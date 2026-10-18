@@ -234,6 +234,9 @@ button:disabled { opacity: .55; cursor: progress; }
 .swing .lbl { color: var(--muted); }
 table.rank td:nth-child(2), table.rank th:nth-child(2), table.roster td:first-child { text-align: left; max-width: 13rem; overflow: hidden; text-overflow: ellipsis; }
 table.rank tr.me td { font-weight: 600; background: var(--surface-2); }
+table.roster tfoot td { font-weight: 600; }
+table.roster tfoot tr:first-child td { border-top: 1px solid var(--line); }
+table.roster tfoot td:first-child { max-width: none; white-space: normal; }
 .ptiny { font-size: .78rem; color: var(--muted); }
 .moves { list-style: none; margin: 0; padding: 0; display: grid; }
 .moves li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 9px 0; border-bottom: 1px solid var(--line); align-items: center; }
@@ -317,7 +320,7 @@ footer a { color: inherit; }
       <div><h2>Root for</h2><ul class="plist" id="rootFor"></ul></div>
       <div><h2>Root against</h2><ul class="plist" id="rootAgainst"></ul></div>
     </div>
-    <p class="note">Ranked by how much a big or bad game from each player moves your expected wins this week, across all your leagues at once. Stacks count: when a QB booms, his receivers usually do too, so a QB throwing to your opponent's WR matters less than his own numbers suggest. Includes your opponents' players, plus every other team's players in leagues with a median game. Players whose games are over drop off.</p>
+    <p class="note">Ranked by how much a big or bad game from each player moves your expected wins this week, across all your leagues at once. Only players on your rosters and your opponents' count. Stacks among them count too: when a QB booms his receivers usually do as well, so a QB throwing to your opponent's WR matters less than his own numbers suggest. Players whose games are over drop off.</p>
 
     <details class="allp" id="allp">
       <summary id="allpSum">Every player in your matchups this week</summary>
@@ -344,7 +347,7 @@ footer a { color: inherit; }
           <tbody id="pbody"></tbody>
         </table>
       </div>
-      <p class="note">Net pts: points he's already put up on your teams, minus points he's scored for your opponents (flipped in tanking leagues). Leverage: how much he can still swing your expected wins. Median rivals count toward leverage only, in leagues with a median game.</p>
+      <p class="note">Net pts: points he's already put up on your teams, minus points he's scored for your opponents (flipped in tanking leagues). Leverage: how much he can still swing your expected wins, including stacks with other players you have or face.</p>
     </details>
   </section>
 
@@ -557,44 +560,74 @@ footer a { color: inherit; }
       }
     }
 
+    // How closely two players' remaining outputs move together, straight from the loadings.
+    const rho = (p, q) => {
+      if (p === q) return 1;
+      const A = rows[idx.get(p)], B = rows[idx.get(q)];
+      if (!A || !B) return 0;
+      return (A.ti >= 0 && A.ti === B.ti ? A.a * B.a : 0) + (A.gi >= 0 && A.gi === B.gi ? A.b * B.b : 0);
+    };
+
     for (const o of outs) {
       const n = o.teams.length, need = Math.ceil(n / 2);
       const parts = o.teams.map(t => t.players.filter(p => p.sd > 0).map(p => [idx.get(p.pid) * N, p.sd]));
-      const tot = new Float64Array(n);
-      const W = new Float32Array(N);
+      const TOT = new Float64Array(N * n);
       let win = 0, med = 0;
       for (let k = 0; k < N; k++) {
+        const base = k * n;
         for (let j = 0; j < n; j++) {
           let v = o.teams[j].proj;
-          for (const [base, sd] of parts[j]) v += sd * Z[base + k];
-          tot[j] = v;
+          for (const [zb, sd] of parts[j]) v += sd * Z[zb + k];
+          TOT[base + j] = v;
         }
-        const me = tot[o.iMe];
-        let w = 0;
-        if (o.iOpp >= 0) { const h = me > tot[o.iOpp] ? 1 : me < tot[o.iOpp] ? 0 : 0.5; win += h; w += h; }
+        const me = TOT[base + o.iMe];
+        if (o.iOpp >= 0) { const op = TOT[base + o.iOpp]; win += me > op ? 1 : me < op ? 0 : 0.5; }
         let below = 0;
-        for (let j = 0; j < n; j++) if (j !== o.iMe && tot[j] < me) below++;
-        const m = below >= need ? 1 : 0;
-        med += m;
-        if (o.medianGames) w += m;
-        W[k] = w;
+        for (let j = 0; j < n; j++) if (j !== o.iMe && TOT[base + j] < me) below++;
+        if (below >= need) med++;
       }
       o.pWin = o.iOpp >= 0 ? win / N : null;
       o.pMed = med / N;
       o.expWins = (o.pWin ?? 0) + (o.medianGames ? o.pMed : 0);
-      o.W = W;
-      // Leverage = average change in this league's wins per 1-SD swing in the player's remaining
-      // output, counting everyone whose output moves with his (Stein's lemma: E[W·z]).
-      for (const p of o.players) p.impact = p.sd > 0 ? covWith(W, Z, idx.get(p.pid) * N, N) : 0;
+
+      // This league's wins in sim k if team j scored `delta` more.
+      const winsAt = (k, j, delta) => {
+        const base = k * n, me = TOT[base + o.iMe] + (j === o.iMe ? delta : 0);
+        let w = 0;
+        if (o.iOpp >= 0) { const op = TOT[base + o.iOpp] + (j === o.iOpp ? delta : 0); w += me > op ? 1 : me < op ? 0 : 0.5; }
+        if (o.medianGames) {
+          let below = 0;
+          for (let t = 0; t < n; t++) if (t !== o.iMe && TOT[base + t] + (t === j ? delta : 0) < me) below++;
+          if (below >= need) w += 1;
+        }
+        return w;
+      };
+      // Direct effect: extra wins per 1-SD better game from this player alone (yours and your opponent's only).
+      const h = 0.5;
+      o.direct = new Map();
+      for (const p of o.players) {
+        if (!(p.sd > 0)) continue;
+        const j = p.role === "you" ? o.iMe : o.iOpp, d = p.sd * h;
+        let s = 0;
+        for (let k = 0; k < N; k++) s += winsAt(k, j, d) - winsAt(k, j, -d);
+        o.direct.set(p.pid, s / N / (2 * h));
+      }
+      // Leverage: his own effect plus the effect of everyone on your roster or your opponent's
+      // whose output moves with his (a QB and his receivers, a defense and the offense it faces).
+      for (const p of o.players) p.impact = p.sd > 0 ? leverage(p.pid, [o], rho) : 0;
       o.players.sort((x, y) => Math.abs(y.impact) - Math.abs(x.impact));
     }
-    return { Z, idx, N };
+    return { rho, idx };
   }
 
-  function covWith(W, Z, base, N) {
+  // Sum of correlated direct effects over the given outlooks; a tanking league counts the other way.
+  function leverage(pid, outs, rho, flipOf = () => 1) {
     let s = 0;
-    for (let k = 0; k < N; k++) s += W[k] * Z[base + k];
-    return s / N;
+    for (const o of outs) {
+      const f = flipOf(o);
+      for (const [q, d] of o.direct || []) s += f * rho(pid, q) * d;
+    }
+    return s;
   }
 
   async function loadLeague(lg, userId, season, ctx) {
@@ -637,12 +670,12 @@ footer a { color: inherit; }
         const teams = ms.map(m => teamProjection(m, lg.scoring_settings || {}, ctx));
         const iMe = ms.indexOf(me), iOpp = opp ? ms.indexOf(opp) : -1;
         const medianGames = s.league_average_match === 1;
-        // Players who can move this league's result: yours, your opponent's, and (with a median game) everyone else's.
+        // Players listed for this league: yours and your opponent's.
         // Odds and leverage are filled in by simulateWeek once every league is loaded.
         const players = [];
         teams.forEach((t, j) => {
           const role = j === iMe ? "you" : j === iOpp ? "opp" : "league";
-          if (role === "league" && !medianGames) return;
+          if (role === "league") return;   // other teams still shape the median in the simulation, but aren't listed
           for (const p of t.players) players.push({ ...p, role, impact: 0, owner: teamName(userMap, rosterById.get(ms[j].roster_id)) });
         });
         outlook = {
@@ -938,13 +971,10 @@ footer a { color: inherit; }
       // (tanking leagues count losses), so a player on several rosters, or stacked with someone
       // on the other side, is measured once with everything that moves with him.
       if (weekSim) {
-        const { Z, idx, N } = weekSim;
-        const Wt = new Float64Array(N);
-        for (const x of outlooks) {
-          const W = x.liveWeek.outlook.W, f = x.tag === "tank" ? -1 : 1;
-          if (W) for (let k = 0; k < N; k++) Wt[k] += f * W[k];
-        }
-        for (const p of all) p.impact = idx.has(p.pid) && p.sd > 0 ? covWith(Wt, Z, idx.get(p.pid) * N, N) : 0;
+        const { rho, idx } = weekSim;
+        const outs = outlooks.map(x => x.liveWeek.outlook);
+        const tankOut = new Set(outlooks.filter(x => x.tag === "tank").map(x => x.liveWeek.outlook));
+        for (const p of all) p.impact = idx.has(p.pid) && p.sd > 0 ? leverage(p.pid, outs, rho, o => tankOut.has(o) ? -1 : 1) : 0;
       }
       for (const p of all) p.stack = isStack(p.leagues.reduce((a, l) => a + l.side, 0), p.impact);
       allPlayers = all;
@@ -1176,6 +1206,92 @@ footer a { color: inherit; }
         ideas.push({ give: a, get: b, rid: t.rid, me: g1, them: g2, score: Math.min(g1, g2 * 1.5) });
       }
     }
+    return pickIdeas(ideas);
+  }
+
+  // Dynasty value = FantasyCalc's trade value (built from real dynasty trades), keyed by Sleeper player ID.
+  // Used only in dynasty and keeper leagues; it measures long-term worth, not rest-of-season points.
+  const leagueKind = x => ({ 2: "dynasty", 1: "keeper" })[x.settings?.type] || null;
+  const fcCache = new Map();         // "numQbs-numTeams-ppr" -> Promise<Map(sleeperId -> { value, name })>
+
+  function fcValues(numQbs, numTeams, ppr) {
+    const key = `${numQbs}-${numTeams}-${ppr}`;
+    if (!fcCache.has(key)) {
+      fcCache.set(key, fetch(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=${numQbs}&numTeams=${numTeams}&ppr=${ppr}`)
+        .then(r => { if (!r.ok) throw new Error(`FantasyCalc returned ${r.status}`); return r.json(); })
+        .then(rows => new Map(rows.filter(z => z.player?.sleeperId).map(z => [String(z.player.sleeperId), { value: z.value, name: z.player.name, pos: z.player.position, team: z.player.maybeTeam }]))));
+      fcCache.get(key).catch(() => fcCache.delete(key));
+    }
+    return fcCache.get(key);
+  }
+
+  async function dynastyFor(x) {
+    const kind = leagueKind(x);
+    if (!kind) return null;
+    const rp = x.lg.roster_positions || [];
+    const numQbs = rp.includes("SUPER_FLEX") || rp.filter(p => p === "QB").length > 1 ? 2 : 1;
+    const recPts = x.lg.scoring_settings?.rec ?? 0;
+    const ppr = recPts >= 0.75 ? 1 : recPts >= 0.25 ? 0.5 : 0;
+    const [vals, traded] = await Promise.all([
+      fcValues(numQbs, x.rosters.length, ppr),
+      kind === "dynasty" ? get(`/league/${x.lg.league_id}/traded_picks`).catch(() => []) : []
+    ]);
+    const value = pid => vals.get(String(pid))?.value || 0;
+    // Future picks (dynasty only): every team owns its own picks unless traded. FantasyCalc prices
+    // them by season and round ("2027 1st"), without draft position.
+    const picks = new Map(x.rosters.map(r => [r.roster_id, []]));
+    if (kind === "dynasty") {
+      const rounds = Math.min(x.settings.draft_rounds || 4, 4);
+      const moved = new Map((traded || []).map(t => [`${t.season}-${t.round}-${t.roster_id}`, t.owner_id]));
+      for (let s = Number(x.lg.season) + 1; s <= Number(x.lg.season) + 3; s++)
+        for (let rd = 1; rd <= rounds; rd++) {
+          const v = vals.get(`FP_${s}_${rd}`)?.value;
+          if (!v) continue;
+          for (const r of x.rosters) {
+            const owner = moved.get(`${s}-${rd}-${r.roster_id}`) ?? r.roster_id;
+            picks.get(owner)?.push({ season: s, round: rd, value: v, from: r.roster_id });
+          }
+        }
+    }
+    const teams = new Map(x.rosters.map(r => {
+      const players = (r.players || []).reduce((a, p) => a + value(p), 0);
+      const pk = picks.get(r.roster_id).reduce((a, p) => a + p.value, 0);
+      return [r.roster_id, { players, picks: pk, total: players + pk }];
+    }));
+    const ranked = [...teams.entries()].sort((a, b) => b[1].total - a[1].total).map(([rid]) => rid);
+    return { kind, numQbs, ppr, vals, value, picks, teams, rank: rid => ranked.indexOf(rid) + 1 };
+  }
+
+  // Dynasty and keeper leagues: 1-for-1 swaps where you gain dynasty value and the other team's
+  // projected lineup improves (their reason to say yes), ranked by the dynasty value you gain.
+  // Your own lineup can't get worse unless you've tagged the league as tanking.
+  function dynastyTradesFor(x, model, dyn) {
+    const mineT = model.teams.find(t => t.rid === x.myRosterId);
+    const top = r => (r.players || []).filter(p => dyn.value(p) > 0).sort((a, b) => dyn.value(b) - dyn.value(a)).slice(0, 14).map(p => dynPlayer(model, dyn, p));
+    const myTop = top(mineT.r), ideas = [];
+    for (const t of model.teams) {
+      if (t.rid === x.myRosterId) continue;
+      for (const a of myTop) for (const b of top(t.r)) {
+        const va = dyn.value(a.pid), vb = dyn.value(b.pid), gain = vb - va;
+        if (gain <= 0 || gain > 0.3 * vb) continue;   // a step up, but close enough to be a real offer
+        const g2 = model.seasonPts(t.pool.filter(p => p !== b.pid).concat(a.pid)) - t.total;
+        if (g2 < 1) continue;
+        const g1 = model.seasonPts(mineT.pool.filter(p => p !== a.pid).concat(b.pid)) - mineT.total;
+        if (g1 < -0.5 && x.tag !== "tank") continue;
+        ideas.push({ give: a, get: b, rid: t.rid, me: g1, them: g2, dv: gain, score: gain });
+      }
+    }
+    return pickIdeas(ideas);
+  }
+
+  // Players with no weekly projection (rookies, injured stashes) take their name and position from FantasyCalc.
+  function dynPlayer(model, dyn, pid) {
+    const v = model.pi(pid), fc = dyn.vals.get(String(pid));
+    if (fc && v.name.startsWith("Player ")) { v.name = fc.name; v.pos = [fc.pos]; v.team = fc.team || ""; }
+    return v;
+  }
+
+  function pickIdeas(ideas) {
     ideas.sort((p, q) => q.score - p.score);
     const out = [], perTeam = new Map();
     for (const i of ideas) {
@@ -1202,10 +1318,11 @@ footer a { color: inherit; }
       if (!weeks.length) return { unavailable: "The fantasy season is over, so there's nothing left to project." };
       const idp = leagues.some(x => (x.lg.roster_positions || []).some(q => ["DL", "LB", "DB", "IDP_FLEX"].includes(q)));
       const positions = ["QB", "RB", "WR", "TE", "K", "DEF", ...(idp ? ["DL", "LB", "DB"] : [])];
-      const [projWeeks, trending, scheds] = await Promise.all([
+      const [projWeeks, trending, scheds, dyns] = await Promise.all([
         Promise.all(weeks.map(w => weekProjections(season, w, positions))),
         get("/players/nfl/trending/add?lookback_hours=24&limit=300").catch(() => []),
-        Promise.all(leagues.map(x => leagueSchedule(x).catch(() => [])))
+        Promise.all(leagues.map(x => leagueSchedule(x).catch(() => []))),
+        Promise.all(leagues.map(x => dynastyFor(x).catch(e => { console.warn("No dynasty values for", x.lg.name, e); return null; })))
       ]);
       const trend = new Map((trending || []).map(t => [t.player_id, t.count]));
       const out = new Map();
@@ -1213,7 +1330,8 @@ footer a { color: inherit; }
         const x = leagues[i];
         try {
           const model = buildModel(x, projWeeks, weeks);
-          out.set(x.lg.league_id, { model, odds: playoffSim(x, model, scheds[i]), adds: addsFor(x, model, trend), trades: tradesFor(x, model) });
+          const dyn = dyns[i];
+          out.set(x.lg.league_id, { model, dyn, odds: playoffSim(x, model, scheds[i]), adds: addsFor(x, model, trend), trades: dyn ? dynastyTradesFor(x, model, dyn) : tradesFor(x, model) });
         } catch (e) { console.error("Season model failed for", x.lg.name, e); }
         await new Promise(r => setTimeout(r, 0));   // let the page breathe between leagues
       }
@@ -1225,7 +1343,7 @@ footer a { color: inherit; }
   }
 
   const pc = p => p == null ? "–" : pctRound(p);
-  const leagueKind = x => ({ 2: "dynasty", 1: "keeper" })[x.settings?.type] || null;
+  const dv = n => Math.round(n).toLocaleString();
 
   function seasonCard(x, r) {
     const o = r.odds, m = r.model, tank = x.tag === "tank";
@@ -1234,6 +1352,11 @@ footer a { color: inherit; }
       .sort((a, b) => b.t.ppw - a.t.ppw);
     const myRank = rows.findIndex(z => z.t.rid === x.myRosterId) + 1;
     const kind = leagueKind(x);
+    const d = r.dyn, myDyn = d?.teams.get(x.myRosterId);
+    const mineR = x.rosters.find(z => z.roster_id === x.myRosterId), taxi = new Set(mineR.taxi || []);
+    const rosterRows = d
+      ? (mineR.players || []).map(p => dynPlayer(m, d, p)).sort((a, b) => d.value(b.pid) - d.value(a.pid) || b.ros - a.ros)
+      : m.teams.find(t => t.rid === x.myRosterId).pool.map(m.pi).sort((a, b) => b.ros - a.ros);
     const sw = o.swing;
     const swingRow = (label, a, b, aL, bL) => a == null || b == null ? "" :
       `<div class="row"><span class="lbl">${label}</span><span>${aL} → <b class="num">${pc(a)}</b></span><span>${bL} → <b class="num">${pc(b)}</b></span><span class="pill ${Math.abs(a - b) >= 0.1 ? "T" : "flat"}">${Math.round(Math.abs(a - b) * 100)}% swing in odds</span></div>`;
@@ -1248,6 +1371,7 @@ footer a { color: inherit; }
         ${o.byes ? `<div><span class="k">First-round bye</span><b class="num">${pc(mine.bye)}</b><span class="s">top ${o.byes}</span></div>` : ""}
         <div><span class="k">Avg. finish</span><b class="num">${mine.seed.toFixed(1)}</b><span class="s">regular-season seed</span></div>
         <div><span class="k">ROS strength</span><b class="num">${ord(myRank)}</b><span class="s">${f1(m.teams.find(t => t.rid === x.myRosterId).ppw)} pts/wk</span></div>
+        ${myDyn ? `<div><span class="k">Dynasty value</span><b class="num">${ord(d.rank(x.myRosterId))}</b><span class="s">${dv(myDyn.total)}${myDyn.picks ? ` incl. ${dv(myDyn.picks)} in picks` : ""}</span></div>` : ""}
       </div>
       ${o.firstWeek && o.pt ? `<div class="swing"><span class="ptiny">Playoff odds after week ${o.firstWeek}${tank ? " (tanking: lower is better)" : ""}</span>
         ${swingRow("Matchup", sw.winH, sw.loseH, "Win", "Lose")}
@@ -1260,11 +1384,13 @@ footer a { color: inherit; }
           <td class="num">${i + 1}</td><td title="${esc(x.nameOf(z.t.rid))}">${esc(x.nameOf(z.t.rid))}</td>
           <td class="num">${rec(z.rec)}</td><td class="num">${f1(z.t.ppw)}</td><td class="num">${o.pt ? pc(z.od.playoff) : "–"}</td>${o.byes ? `<td class="num">${pc(z.od.bye)}</td>` : ""}
         </tr>`).join("")}</tbody></table></div>
-      <details class="weeks"><summary>Your roster, rest of season</summary><div class="tablewrap"><table class="roster">
-        <thead><tr><th>Player</th><th>Pos</th><th>ROS pts</th><th>Over repl.</th></tr></thead>
-        <tbody>${m.teams.find(t => t.rid === x.myRosterId).pool.map(m.pi).sort((a, b) => b.ros - a.ros).map(v => `<tr>
-          <td>${esc(v.name)}${v.inj ? ` <span class="ptiny">${esc(v.inj)}</span>` : ""}</td><td>${esc(v.pos[0])}${v.team && v.pos[0] !== "DEF" ? " · " + esc(v.team) : ""}</td>
-          <td class="num">${f1(v.ros)}</td><td class="num">${signed(m.overRepl(v))}</td></tr>`).join("")}</tbody></table></div></details>
+      <details class="weeks"><summary>Your roster, ${d ? "rest of season and dynasty value" : "rest of season"}</summary><div class="tablewrap"><table class="roster">
+        <thead><tr><th>Player</th><th>Pos</th>${d ? '<th title="FantasyCalc dynasty trade value">Dynasty</th>' : ""}<th>ROS pts</th><th>Over repl.</th></tr></thead>
+        <tbody>${rosterRows.map(v => `<tr>
+          <td>${esc(v.name)}${v.inj ? ` <span class="ptiny">${esc(v.inj)}</span>` : ""}${taxi.has(v.pid) ? ' <span class="ptiny">taxi</span>' : ""}</td><td>${esc(v.pos[0])}${v.team && v.pos[0] !== "DEF" ? " · " + esc(v.team) : ""}</td>
+          ${d ? `<td class="num">${d.value(v.pid) ? dv(d.value(v.pid)) : "–"}</td>` : ""}<td class="num">${f1(v.ros)}</td><td class="num">${signed(m.overRepl(v))}</td></tr>`).join("")}</tbody>
+        ${d ? `<tfoot><tr><td colspan="2">${myDyn.picks ? "Players" : "Total"}</td><td class="num">${dv(myDyn.players)}</td><td colspan="2"></td></tr>${myDyn.picks ? `<tr><td colspan="2">${d.picks.get(x.myRosterId).length} future picks</td><td class="num">${dv(myDyn.picks)}</td><td colspan="2"></td></tr><tr><td colspan="2">Total</td><td class="num">${dv(myDyn.total)}</td><td colspan="2"></td></tr>` : ""}</tfoot>` : ""}</table></div>
+        ${d ? `<p class="ptiny">ROS pts: Sleeper projections for the rest of this season. Dynasty: FantasyCalc trade value (${d.numQbs === 2 ? "superflex" : "1QB"}, ${x.rosters.length} teams, ${d.ppr} PPR), long-term worth on a 0–10,000+ scale${d.kind === "dynasty" ? "; future picks priced by round, not draft slot" : ""}.</p>` : ""}</details>
     </article>`;
   }
 
@@ -1277,14 +1403,16 @@ footer a { color: inherit; }
         <span class="sub">${f1(a.v.ros)} ROS pts${a.trend ? ` · ${a.trend.toLocaleString()} adds in 24h` : ""}${a.drop ? ` · <span class="verb drop">Drop</span>${esc(a.drop.name)} (${f1(a.drop.ros)})` : " · open roster spot"}</span></span>
         <span class="gain num">+${f1(a.net)}<small>lineup pts ROS</small></span></li>`).join("")
       : `<li><span class="none">No free agent improves your projected lineup right now.</span></li>`;
-    const trades = r.trades.length ? r.trades.map(t => `<li><span class="what"><span class="verb give">Give</span>${who(t.give)} <span class="verb get">Get</span>${who(t.get)}
+    const trades = r.trades.length ? r.trades.map(t => t.dv != null ? `<li><span class="what"><span class="verb give">Give</span>${who(t.give)} <span class="verb get">Get</span>${who(t.get)}
+        <span class="sub">with ${esc(x.nameOf(t.rid))} · dynasty ${dv(r.dyn.value(t.give.pid))} → ${dv(r.dyn.value(t.get.pid))} · your lineup ROS ${signed(t.me)} · theirs +${f1(t.them)}</span></span>
+        <span class="gain num">+${dv(t.dv)}<small>dynasty value</small></span></li>` : `<li><span class="what"><span class="verb give">Give</span>${who(t.give)} <span class="verb get">Get</span>${who(t.get)}
         <span class="sub">with ${esc(x.nameOf(t.rid))} · they gain +${f1(t.them)}</span></span>
         <span class="gain num">+${f1(t.me)}<small>your lineup ROS</small></span></li>`).join("")
-      : `<li><span class="none">No one-for-one swap helps both lineups by projection.</span></li>`;
+      : `<li><span class="none">${r.dyn ? "No one-for-one swap gains you dynasty value while helping their lineup." : "No one-for-one swap helps both lineups by projection."}</span></li>`;
     return `<article class="scard ${x.tag === "tank" ? "is-tank" : ""}">
       <div>
         <h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3>
-        <div class="meta"><span>${esc(x.myTeam)}</span>${x.tag === "tank" ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}: ROS value only</span>` : ""}${faab != null ? `<span>FAAB left: <b class="num">$${faab}</b></span>` : ""}</div>
+        <div class="meta"><span>${esc(x.myTeam)}</span>${x.tag === "tank" ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}${r.dyn ? ": trades by dynasty value" : ": ROS value only"}</span>` : ""}${faab != null ? `<span>FAAB left: <b class="num">$${faab}</b></span>` : ""}</div>
       </div>
       <div><p class="eyebrow">Recommended adds</p><ul class="moves">${adds}</ul></div>
       <div><p class="eyebrow">Trade ideas</p><ul class="moves">${trades}</ul></div>
@@ -1314,7 +1442,7 @@ footer a { color: inherit; }
       </section>`;
     } else {
       $("movesBody").innerHTML = `<section class="panel">
-        <p class="lede">Ranked by how much each move raises your projected best-lineup points for ${span}. Adds look at every free agent with a projection; drops come from your bench, never your IR. Trade ideas are one-for-one swaps where both teams' projected lineups improve, so the other manager has a reason to say yes. Keeper and dynasty value isn't included.</p>
+        <p class="lede">Ranked by how much each move raises your projected best-lineup points for ${span}. Adds look at every free agent with a projection; drops come from your bench, never your IR. Trade ideas are one-for-one swaps where both teams' projected lineups improve, so the other manager has a reason to say yes. In dynasty and keeper leagues, trade ideas are ranked instead by the dynasty value you gain (FantasyCalc trade values), still only where their projected lineup improves and yours doesn't get worse; adds stay rest-of-season.</p>
         <div class="scards">${have.map(x => movesCard(x, res.out.get(x.lg.league_id))).join("")}</div>
       </section>`;
     }
