@@ -271,7 +271,7 @@ footer a { color: inherit; }
       <div><h2>Root for</h2><ul class="plist" id="rootFor"></ul></div>
       <div><h2>Root against</h2><ul class="plist" id="rootAgainst"></ul></div>
     </div>
-    <p class="note">Ranked by how much a big or bad game from each player moves your expected wins this week, added up across all your leagues. Includes your opponents' players, plus every other team's players in leagues with a median game. Players whose games are over drop off.</p>
+    <p class="note">Ranked by how much a big or bad game from each player moves your expected wins this week, across all your leagues at once. Stacks count: when a QB booms, his receivers usually do too, so a QB throwing to your opponent's WR matters less than his own numbers suggest. Includes your opponents' players, plus every other team's players in leagues with a median game. Players whose games are over drop off.</p>
 
     <details class="allp" id="allp">
       <summary id="allpSum">Every player in your matchups this week</summary>
@@ -379,7 +379,7 @@ footer a { color: inherit; }
     }
 
     // Game clock: ESPN scoreboard first (has the clock), Sleeper's schedule as a fallback (status only).
-    const games = new Map();
+    const games = new Map(), opps = new Map();
     try {
       const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week=${week}&dates=${season}`);
       const d = await r.json();
@@ -397,10 +397,9 @@ footer a { color: inherit; }
           rem = Math.max(0, Math.min(1, left / 60));
           label = /half/i.test(type.detail || "") ? "Half" : st.period >= 5 ? "OT" : `Q${st.period} ${st.displayClock}`;
         }
-        for (const c of e.competitions?.[0]?.competitors || []) {
-          const ab = c.team?.abbreviation;
-          if (ab) games.set(ESPN_TEAM[ab] || ab, { rem, label });
-        }
+        const abs = (e.competitions?.[0]?.competitors || []).map(c => c.team?.abbreviation).filter(Boolean).map(ab => ESPN_TEAM[ab] || ab);
+        for (const ab of abs) games.set(ab, { rem, label });
+        if (abs.length === 2) { opps.set(abs[0], abs[1]); opps.set(abs[1], abs[0]); }
       }
     } catch {}
     if (!games.size) {
@@ -409,10 +408,15 @@ footer a { color: inherit; }
         for (const g of (await r.json()).filter(g => g.week === week)) {
           const v = g.status === "complete" ? { rem: 0, label: "Final" } : g.status === "in_game" ? { rem: 0.5, label: "Live" } : { rem: 1, label: "Upcoming" };
           games.set(g.home, v); games.set(g.away, v);
+          opps.set(g.home, g.away); opps.set(g.away, g.home);
         }
       } catch {}
     }
-    return { proj: proj.map, game: team => games.get(team) || { rem: 0, label: games.size ? "Bye" : "?" } };
+    return {
+      proj: proj.map,
+      game: team => games.get(team) || { rem: 0, label: games.size ? "Bye" : "?" },
+      opp: team => opps.get(team) || null
+    };
   }
 
   function playerName(x, pid) {
@@ -441,59 +445,101 @@ footer a { color: inherit; }
     return { now: m.points || 0, proj: (m.points || 0) + remaining, sd: Math.sqrt(variance), players };
   }
 
-  const normPdf = z => Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI);
-  function normCdf(z) {
-    const t = 1 / (1 + 0.2316419 * Math.abs(z));
-    const p = normPdf(z) * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-    return z >= 0 ? 1 - p : p;
-  }
-  function seededNormals(n) {
-    let s = 20261018;
-    const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) + 0.5) / 4294967296;
-    const out = new Float64Array(n);
-    for (let i = 0; i < n; i += 2) {
-      const r = Math.sqrt(-2 * Math.log(rnd())), a = 2 * Math.PI * rnd();
-      out[i] = r * Math.cos(a); if (i + 1 < n) out[i + 1] = r * Math.sin(a);
-    }
-    return out;
+  // ---------- Correlated week simulation ----------
+  // Each player's remaining output is mean + sd * z, and z mixes three shocks:
+  //   T: how his offense does, G: how high-scoring his NFL game is, plus his own luck.
+  // [T, G] loadings by position. They work out to roughly QB-own WR +0.5, QB-own RB +0.2,
+  // QB-opposing WR +0.1, DEF-opposing QB -0.4. A defense loads on the offense it faces.
+  const LOAD = { QB: [0.7, 0.35], WR: [0.55, 0.35], TE: [0.5, 0.3], RB: [0.3, 0.15], K: [0.45, 0.2], DEF: [-0.5, -0.25] };
+  const SIMS = 6000;     // even: the second half mirrors the first (antithetic draws)
+  let weekSim = null;    // { Z, idx: Map(pid -> row), N } from the latest load
+
+  function gaussian(seed) {
+    let s = seed >>> 0, spare = null;
+    const u = () => ((s = (s * 1664525 + 1013904223) >>> 0) + 0.5) / 4294967296;
+    return () => {
+      if (spare !== null) { const v = spare; spare = null; return v; }
+      const r = Math.sqrt(-2 * Math.log(u())), a = 2 * Math.PI * u();
+      spare = r * Math.sin(a);
+      return r * Math.cos(a);
+    };
   }
 
-  // Win odds this week plus how sensitive your expected wins are to every team's score.
-  function weekOdds(teams, me, opp, medianGames) {
-    const n = teams.length;
-    const dWins = new Float64Array(n);
-    let pWin = null;
-    if (opp >= 0) {
-      const margin = teams[me].proj - teams[opp].proj;
-      const s = Math.hypot(teams[me].sd, teams[opp].sd);
-      if (s < 1e-6) pWin = margin > 0 ? 1 : margin < 0 ? 0 : 0.5;
-      else {
-        pWin = normCdf(margin / s);
-        const dens = normPdf(margin / s) / s;
-        dWins[me] += dens; dWins[opp] -= dens;
+  // Runs one shared simulation for every league's live week, so a player who is on several
+  // rosters gets the same game everywhere. Fills each outlook with odds and per-player leverage.
+  function simulateWeek(leagues, ctx) {
+    const outs = leagues.map(x => x?.liveWeek?.outlook).filter(o => o?.teams);
+    if (!outs.length || !ctx) return null;
+
+    // Everyone with something left to play, with their factor loadings.
+    const idx = new Map(), rows = [], nflTeam = new Map(), nflGame = new Map();
+    const slot = (map, key) => { if (!map.has(key)) map.set(key, map.size); return map.get(key); };
+    for (const o of outs) for (const t of o.teams) for (const p of t.players) {
+      if (p.sd <= 0 || idx.has(p.pid)) continue;
+      const opp = ctx.opp(p.team);
+      let [a, b] = LOAD[p.pos] || [0, 0];
+      const faces = p.pos === "DEF" ? opp : p.team;
+      if (!faces) a = 0;
+      if (!p.team) b = 0;
+      idx.set(p.pid, rows.length);
+      rows.push({
+        a, b, c: Math.sqrt(Math.max(0, 1 - a * a - b * b)),
+        ti: faces ? slot(nflTeam, faces) : -1,
+        gi: p.team ? slot(nflGame, [p.team, opp || ""].sort().join("-")) : -1
+      });
+    }
+    const P = rows.length, N = SIMS, H = N / 2;
+    const Z = new Float32Array(P * N);
+    const draw = gaussian(20261018);
+    const T = new Float64Array(nflTeam.size), G = new Float64Array(nflGame.size);
+    for (let k = 0; k < H; k++) {
+      for (let i = 0; i < T.length; i++) T[i] = draw();
+      for (let i = 0; i < G.length; i++) G[i] = draw();
+      for (let r = 0; r < P; r++) {
+        const q = rows[r];
+        const z = (q.ti >= 0 ? q.a * T[q.ti] : 0) + (q.gi >= 0 ? q.b * G[q.gi] : 0) + q.c * draw();
+        Z[r * N + k] = z; Z[r * N + k + H] = -z;
       }
     }
-    // Median: simulate everyone's final, count how often you land in the top half.
-    const N = 3000, Z = seededNormals(N * n), need = Math.ceil(n / 2), step = 4;
-    const beat = (shift, delta) => {
-      let hits = 0;
+
+    for (const o of outs) {
+      const n = o.teams.length, need = Math.ceil(n / 2);
+      const parts = o.teams.map(t => t.players.filter(p => p.sd > 0).map(p => [idx.get(p.pid) * N, p.sd]));
+      const tot = new Float64Array(n);
+      const W = new Float32Array(N);
+      let win = 0, med = 0;
       for (let k = 0; k < N; k++) {
-        const o = k * n;
-        const my = teams[me].proj + teams[me].sd * Z[o + me] + (shift === me ? delta : 0);
-        let below = 0;
         for (let j = 0; j < n; j++) {
-          if (j === me) continue;
-          if (teams[j].proj + teams[j].sd * Z[o + j] + (shift === j ? delta : 0) < my) below++;
+          let v = o.teams[j].proj;
+          for (const [base, sd] of parts[j]) v += sd * Z[base + k];
+          tot[j] = v;
         }
-        if (below >= need) hits++;
+        const me = tot[o.iMe];
+        let w = 0;
+        if (o.iOpp >= 0) { const h = me > tot[o.iOpp] ? 1 : me < tot[o.iOpp] ? 0 : 0.5; win += h; w += h; }
+        let below = 0;
+        for (let j = 0; j < n; j++) if (j !== o.iMe && tot[j] < me) below++;
+        const m = below >= need ? 1 : 0;
+        med += m;
+        if (o.medianGames) w += m;
+        W[k] = w;
       }
-      return hits / N;
-    };
-    const pMed = beat(-1, 0);
-    const dMed = new Float64Array(n);
-    if (medianGames) for (let j = 0; j < n; j++) dMed[j] = (beat(j, step) - beat(j, -step)) / (2 * step);
-    for (let j = 0; j < n; j++) dWins[j] += dMed[j];
-    return { pWin, pMed, dWins };
+      o.pWin = o.iOpp >= 0 ? win / N : null;
+      o.pMed = med / N;
+      o.expWins = (o.pWin ?? 0) + (o.medianGames ? o.pMed : 0);
+      o.W = W;
+      // Leverage = average change in this league's wins per 1-SD swing in the player's remaining
+      // output, counting everyone whose output moves with his (Stein's lemma: E[W·z]).
+      for (const p of o.players) p.impact = p.sd > 0 ? covWith(W, Z, idx.get(p.pid) * N, N) : 0;
+      o.players.sort((x, y) => Math.abs(y.impact) - Math.abs(x.impact));
+    }
+    return { Z, idx, N };
+  }
+
+  function covWith(W, Z, base, N) {
+    let s = 0;
+    for (let k = 0; k < N; k++) s += W[k] * Z[base + k];
+    return s / N;
   }
 
   async function loadLeague(lg, userId, season, ctx) {
@@ -535,22 +581,20 @@ footer a { color: inherit; }
       if (live && ctx) {
         const teams = ms.map(m => teamProjection(m, lg.scoring_settings || {}, ctx));
         const iMe = ms.indexOf(me), iOpp = opp ? ms.indexOf(opp) : -1;
-        const odds = weekOdds(teams, iMe, iOpp, s.league_average_match === 1);
-        // A player's leverage: how far a one-standard-deviation game from him moves your expected wins.
+        const medianGames = s.league_average_match === 1;
+        // Players who can move this league's result: yours, your opponent's, and (with a median game) everyone else's.
+        // Odds and leverage are filled in by simulateWeek once every league is loaded.
         const players = [];
         teams.forEach((t, j) => {
           const role = j === iMe ? "you" : j === iOpp ? "opp" : "league";
-          for (const p of t.players) {
-            const impact = odds.dWins[j] * p.sd;
-            if (role !== "league" || Math.abs(impact) >= 0.004) players.push({ ...p, role, impact, owner: teamName(userMap, rosterById.get(ms[j].roster_id)) });
-          }
+          if (role === "league" && !medianGames) return;
+          for (const p of t.players) players.push({ ...p, role, impact: 0, owner: teamName(userMap, rosterById.get(ms[j].roster_id)) });
         });
-        players.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
         outlook = {
+          teams, iMe, iOpp, medianGames,
           my: teams[iMe].proj, opp: iOpp >= 0 ? teams[iOpp].proj : null,
-          med: median(teams.map(t => t.proj)), pWin: odds.pWin, pMed: odds.pMed,
-          expWins: (odds.pWin ?? 0) + (s.league_average_match === 1 ? odds.pMed : 0),
-          maxWins: (iOpp >= 0 ? 1 : 0) + (s.league_average_match === 1 ? 1 : 0),
+          med: median(teams.map(t => t.proj)), pWin: null, pMed: null, expWins: 0,
+          maxWins: (iOpp >= 0 ? 1 : 0) + (medianGames ? 1 : 0),
           players
         };
       }
@@ -624,8 +668,13 @@ footer a { color: inherit; }
   const oddsPill = (p, invert) => { const q = invert ? 1 - p : p; return `<span class="pill ${q >= 0.6 ? "W" : q <= 0.4 ? "L" : "T"}">${pctRound(p)}</span>`; };
   const ROLE = { you: "your team", opp: "opponent", league: "median rival" };
 
+  // A player whose net pull runs opposite to the roster he's on matters mostly through stacks.
+  const STACK_TIP = "Net effect runs through stacks: when he has a big game, players on your side of the ledger (usually his QB or receivers) tend to as well, and that outweighs whose roster he's on.";
+  const stackTag = p => p.stack ? ` <span class="pill flat" title="${STACK_TIP}">stack</span>` : "";
+  const isStack = (direct, impact) => Math.abs(impact) >= 0.02 && direct !== 0 && Math.sign(direct) !== Math.sign(impact);
+
   function playerCell(p, withOwner) {
-    return `<span class="who"><b>${esc(p.name)}</b> <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span>
+    return `<span class="who"><b>${esc(p.name)}</b>${stackTag(p)} <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span>
       <span class="line num">${f1(p.actual)} pts · ${p.rem > 0.05 ? `${f1(p.rem)} more proj.` : "done"} · ${esc(p.game)}${withOwner && p.role !== "you" ? ` · <span title="${esc(p.owner)}">${ROLE[p.role]}</span>` : ""}</span></span>`;
   }
   function impactBar(v, scale) {
@@ -649,7 +698,7 @@ footer a { color: inherit; }
     const scale = Math.max(0.01, ...allPlayers.map(p => Math.abs(p.impact)));
     $("allpSum").textContent = `Every player in your matchups this week (${allPlayers.length})`;
     $("pbody").innerHTML = rows.length ? rows.map(p => `<tr>
-      <td class="pn"><b>${esc(p.name)}</b> <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span></td>
+      <td class="pn"><b>${esc(p.name)}</b>${stackTag(p)} <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span></td>
       <td class="lbl">${esc(p.game)}</td>
       <td class="num">${f1(p.actual)}</td>
       <td class="num">${p.rem > 0.05 ? f1(p.rem) : "—"}</td>
@@ -664,7 +713,10 @@ footer a { color: inherit; }
     const o = x.liveWeek?.outlook;
     if (!o) return "";
     const flip = x.tag === "tank" ? -1 : 1;
-    const ps = o.players.map(p => ({ ...p, impact: p.impact * flip }));
+    const ps = o.players.map(p => {
+      const impact = p.impact * flip;
+      return { ...p, impact, stack: isStack((p.role === "you" ? 1 : -1) * flip, impact) };
+    });
     const pro = ps.filter(p => p.impact > 0).slice(0, 5);
     const con = ps.filter(p => p.impact < 0).slice(0, 5);
     const scale = Math.max(0.01, ...o.players.map(p => Math.abs(p.impact)));
@@ -753,6 +805,8 @@ footer a { color: inherit; }
     const counted = view === "tank" ? leagues : leagues.filter(x => x.tag !== "tank");
     const sum = k => counted.reduce((r, x) => ({ w: r.w + x[k].w, l: r.l + x[k].l, t: r.t + x[k].t }), { w: 0, l: 0, t: 0 });
     const off = sum("official"), h2h = sum("h2h"), med = sum("med"), ap = sum("ap");
+    const medLeagues = counted.filter(x => x.medianGames);
+    const medReal = medLeagues.reduce((r, x) => ({ w: r.w + x.med.w, l: r.l + x.med.l, t: r.t + x.med.t }), { w: 0, l: 0, t: 0 });
     const allDone = counted.flatMap(x => x.weeks.filter(w => !w.live && w.regular));
     const avgMargin = allDone.length ? allDone.reduce((a, w) => a + w.my - w.med, 0) / allDone.length : null;
     const best = allDone.reduce((b, w) => (!b || w.my - w.med > b.my - b.med) ? w : b, null);
@@ -760,7 +814,8 @@ footer a { color: inherit; }
     $("board").innerHTML = !counted.length ? `<div><div class="k">Nothing to total</div><div class="s">Every league here is tanking. Open the Tanking tab to see their totals.</div></div>` : `
       <div><div class="k">Official record</div><div class="v num">${rec(off)}</div><div class="s">as Sleeper counts it</div></div>
       <div><div class="k">Head-to-head</div><div class="v num">${rec(h2h)}</div><div class="s">${pctTxt(h2h)} win pct</div></div>
-      <div><div class="k">Vs. median</div><div class="v num">${rec(med)}</div><div class="s">${pctTxt(med)} · beat the middle score</div></div>
+      <div><div class="k">Median wins that count</div><div class="v num">${medLeagues.length ? rec(medReal) : "–"}</div><div class="s">${medLeagues.length ? `${medLeagues.length} league${medLeagues.length === 1 ? "" : "s"} with a median game` : "no leagues with a median game"}</div></div>
+      <div><div class="k">Vs. median, all leagues</div><div class="v num">${rec(med)}</div><div class="s">${pctTxt(med)} · if every league had one</div></div>
       <div><div class="k">All-play</div><div class="v num">${pctTxt(ap)}</div><div class="s">${rec(ap)} vs every team, every week</div></div>
       <div><div class="k">In a playoff spot</div><div class="v num">${counted.filter(x => x.playoffTeams && x.rank <= x.playoffTeams).length} of ${counted.length}</div><div class="s">by current standings</div></div>
       <div><div class="k">Avg. margin over median</div><div class="v num">${signed(avgMargin)}</div><div class="s">${best ? `best: +${f1(best.my - best.med)} in wk ${best.week}` : "points per week"}</div></div>`;
@@ -819,6 +874,19 @@ footer a { color: inherit; }
         agg.set(p.pid, a);
       }
       const all = [...agg.values()];
+      // Cross-league leverage from the shared simulation: one combined win count per simulated week
+      // (tanking leagues count losses), so a player on several rosters, or stacked with someone
+      // on the other side, is measured once with everything that moves with him.
+      if (weekSim) {
+        const { Z, idx, N } = weekSim;
+        const Wt = new Float64Array(N);
+        for (const x of outlooks) {
+          const W = x.liveWeek.outlook.W, f = x.tag === "tank" ? -1 : 1;
+          if (W) for (let k = 0; k < N; k++) Wt[k] += f * W[k];
+        }
+        for (const p of all) p.impact = idx.has(p.pid) && p.sd > 0 ? covWith(Wt, Z, idx.get(p.pid) * N, N) : 0;
+      }
+      for (const p of all) p.stack = isStack(p.leagues.reduce((a, l) => a + l.side, 0), p.impact);
       allPlayers = all;
       const pro = all.filter(p => p.impact > 0).sort((a, b) => b.impact - a.impact).slice(0, 8);
       const con = all.filter(p => p.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 8);
@@ -880,6 +948,7 @@ footer a { color: inherit; }
         ctx = await liveContext(season, state.week).catch(e => { console.warn("No projections:", e); return null; });
       }
       const data = await Promise.all(leagues.map(l => loadLeague(l, user.user_id, season, ctx).catch(e => { console.error(l.name, e); return null; })));
+      weekSim = simulateWeek(data, ctx);
       render(user, season, data);
       store.set("ml.user", username);
       const anyLive = data.some(x => x?.liveWeek?.live);
