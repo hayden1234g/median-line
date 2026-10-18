@@ -90,7 +90,7 @@ button:disabled { opacity: .55; cursor: progress; }
 .board .s { font-size: .82rem; color: var(--muted); }
 
 /* This week ticker */
-.ticker { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.ticker { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 12px; }
 .tick { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; min-width: 0; }
 .tick .lname { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tick .score { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
@@ -133,6 +133,41 @@ button:disabled { opacity: .55; cursor: progress; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .78rem; color: var(--muted); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .legend i.ln { height: 2px; vertical-align: 3px; background: var(--median); border-radius: 0; }
+
+.tick .rows.proj { grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 3px 12px; }
+.tick .rows .hd { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+.tick .rows .opp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Outlook + who matters */
+.outlook { display: grid; gap: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+.odds { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.odds > div { display: grid; min-width: 0; }
+.odds .k { font-size: .74rem; color: var(--muted); }
+.odds b { font: 600 1.35rem/1.15 var(--display); }
+.odds .s { font-size: .74rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 520px) { .odds { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.matters, .root { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 12px 20px; }
+.matters .eyebrow { margin-bottom: 6px; }
+.root { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; gap: 16px 28px; }
+.root h2 { font: 700 1.25rem/1 var(--display); text-transform: uppercase; margin: 0 0 8px; letter-spacing: .02em; }
+.plist { list-style: none; margin: 0; padding: 0; display: grid; }
+.plist li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.plist li:last-child { border-bottom: 0; }
+.plist li.none { display: block; color: var(--muted); font-size: .86rem; }
+.plist .who { min-width: 0; font-size: .9rem; }
+.plist .who .lbl { color: var(--muted); font-size: .78rem; }
+.plist .line { display: block; color: var(--muted); font-size: .76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plist .where { grid-column: 1; display: flex; flex-wrap: wrap; gap: 4px; }
+.plist .where + .impact { grid-row: 1 / span 2; grid-column: 2; }
+.chip { font-size: .7rem; padding: 2px 6px; border-radius: 4px; background: var(--surface-2); color: var(--muted); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.up { box-shadow: inset 2px 0 0 var(--good); }
+.chip.down { box-shadow: inset 2px 0 0 var(--bad); }
+.impact { display: flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--muted); }
+.impact .bar { width: 54px; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.impact .bar i { display: block; height: 100%; border-radius: 3px; }
+.impact .bar i.up { background: var(--good); }
+.impact .bar i.down { background: var(--bad); }
+.note { color: var(--muted); font-size: .8rem; margin: 8px 0 0; max-width: 80ch; }
 
 details.weeks summary { cursor: pointer; color: var(--muted); font-size: .86rem; }
 .tablewrap { overflow-x: auto; margin-top: 8px; }
@@ -183,6 +218,15 @@ footer a { color: inherit; }
   <section id="weekSec" hidden>
     <p class="eyebrow" id="weekTitle">This week</p>
     <div class="ticker" id="ticker"></div>
+  </section>
+
+  <section id="rootSec" hidden>
+    <p class="eyebrow" id="rootTitle">Rooting guide</p>
+    <div class="root">
+      <div><h2>Root for</h2><ul class="plist" id="rootFor"></ul></div>
+      <div><h2>Root against</h2><ul class="plist" id="rootAgainst"></ul></div>
+    </div>
+    <p class="note">Ranked by how much a big or bad game from each player moves your expected wins this week, added up across all your leagues. Includes your opponents' players, plus every other team's players in leagues with a median game. Players whose games are over drop off.</p>
   </section>
 
   <section id="leagueSec" hidden>
@@ -244,7 +288,142 @@ footer a { color: inherit; }
     return u?.metadata?.team_name || u?.display_name || `Team ${roster?.roster_id ?? "?"}`;
   }
 
-  async function loadLeague(lg, userId, season) {
+  // ---------- Projections ----------
+  // Live context for one NFL week: Sleeper player projections plus how much of each team's game is left.
+  const projCache = new Map();
+  const ESPN_TEAM = { WSH: "WAS" };
+
+  async function liveContext(season, week) {
+    const key = `${season}-${week}`;
+    let proj = projCache.get(key);
+    if (!proj || Date.now() - proj.at > 10 * 60 * 1000) {
+      const pos = ["QB", "RB", "WR", "TE", "K", "DEF", "DL", "LB", "DB"].map(p => "position%5B%5D=" + p).join("&");
+      const r = await fetch(`https://api.sleeper.app/projections/nfl/${season}/${week}?season_type=regular&${pos}`);
+      if (!r.ok) throw new Error("projections unavailable");
+      const rows = await r.json();
+      proj = { at: Date.now(), map: new Map(rows.map(x => [x.player_id, x])) };
+      projCache.set(key, proj);
+    }
+
+    // Game clock: ESPN scoreboard first (has the clock), Sleeper's schedule as a fallback (status only).
+    const games = new Map();
+    try {
+      const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week=${week}&dates=${season}`);
+      const d = await r.json();
+      for (const e of d.events || []) {
+        const st = e.status || {}, type = st.type || {};
+        let rem, label;
+        if (type.state === "pre") {
+          rem = 1;
+          label = new Date(e.date).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+        } else if (type.state === "post") {
+          rem = 0; label = "Final";
+        } else {
+          const [mm, ss] = String(st.displayClock || "0:00").split(":").map(Number);
+          const left = st.period >= 5 ? 0 : (4 - st.period) * 15 + (mm || 0) + (ss || 0) / 60;
+          rem = Math.max(0, Math.min(1, left / 60));
+          label = /half/i.test(type.detail || "") ? "Half" : st.period >= 5 ? "OT" : `Q${st.period} ${st.displayClock}`;
+        }
+        for (const c of e.competitions?.[0]?.competitors || []) {
+          const ab = c.team?.abbreviation;
+          if (ab) games.set(ESPN_TEAM[ab] || ab, { rem, label });
+        }
+      }
+    } catch {}
+    if (!games.size) {
+      try {
+        const r = await fetch(`https://api.sleeper.app/schedule/nfl/regular/${season}`);
+        for (const g of (await r.json()).filter(g => g.week === week)) {
+          const v = g.status === "complete" ? { rem: 0, label: "Final" } : g.status === "in_game" ? { rem: 0.5, label: "Live" } : { rem: 1, label: "Upcoming" };
+          games.set(g.home, v); games.set(g.away, v);
+        }
+      } catch {}
+    }
+    return { proj: proj.map, game: team => games.get(team) || { rem: 0, label: games.size ? "Bye" : "?" } };
+  }
+
+  function playerName(x, pid) {
+    const p = x?.player;
+    if (!p) return isNaN(pid) ? `${pid} D/ST` : `Player ${pid}`;
+    if (p.position === "DEF") return `${p.last_name || pid} D/ST`;
+    return `${(p.first_name || "")[0] || ""}. ${p.last_name || ""}`.trim();
+  }
+
+  // Projected final for one lineup: points already scored + the unplayed share of each starter's projection.
+  function teamProjection(m, scoring, ctx) {
+    let remaining = 0, variance = 0;
+    const players = [];
+    for (const pid of m.starters || []) {
+      if (!pid || pid === "0") continue;
+      const x = ctx.proj.get(pid);
+      const team = x?.team || x?.player?.team || (isNaN(pid) ? pid : null);
+      const g = ctx.game(team);
+      const full = x ? Math.max(0, Object.entries(x.stats || {}).reduce((a, [k, v]) => a + v * (scoring[k] || 0), 0)) : 0;
+      const rem = full * g.rem;
+      // Rough spread of a fantasy score around its projection, shrinking as the game runs out.
+      const sd = full > 0 ? Math.sqrt(g.rem) * (0.45 * full + 2) : 0;
+      remaining += rem; variance += sd * sd;
+      players.push({ pid, name: playerName(x, pid), pos: x?.player?.position || (isNaN(pid) ? "DEF" : ""), team, actual: m.players_points?.[pid] || 0, full, rem, sd, game: g.label });
+    }
+    return { now: m.points || 0, proj: (m.points || 0) + remaining, sd: Math.sqrt(variance), players };
+  }
+
+  const normPdf = z => Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI);
+  function normCdf(z) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(z));
+    const p = normPdf(z) * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+    return z >= 0 ? 1 - p : p;
+  }
+  function seededNormals(n) {
+    let s = 20261018;
+    const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) + 0.5) / 4294967296;
+    const out = new Float64Array(n);
+    for (let i = 0; i < n; i += 2) {
+      const r = Math.sqrt(-2 * Math.log(rnd())), a = 2 * Math.PI * rnd();
+      out[i] = r * Math.cos(a); if (i + 1 < n) out[i + 1] = r * Math.sin(a);
+    }
+    return out;
+  }
+
+  // Win odds this week plus how sensitive your expected wins are to every team's score.
+  function weekOdds(teams, me, opp, medianGames) {
+    const n = teams.length;
+    const dWins = new Float64Array(n);
+    let pWin = null;
+    if (opp >= 0) {
+      const margin = teams[me].proj - teams[opp].proj;
+      const s = Math.hypot(teams[me].sd, teams[opp].sd);
+      if (s < 1e-6) pWin = margin > 0 ? 1 : margin < 0 ? 0 : 0.5;
+      else {
+        pWin = normCdf(margin / s);
+        const dens = normPdf(margin / s) / s;
+        dWins[me] += dens; dWins[opp] -= dens;
+      }
+    }
+    // Median: simulate everyone's final, count how often you land in the top half.
+    const N = 3000, Z = seededNormals(N * n), need = Math.ceil(n / 2), step = 4;
+    const beat = (shift, delta) => {
+      let hits = 0;
+      for (let k = 0; k < N; k++) {
+        const o = k * n;
+        const my = teams[me].proj + teams[me].sd * Z[o + me] + (shift === me ? delta : 0);
+        let below = 0;
+        for (let j = 0; j < n; j++) {
+          if (j === me) continue;
+          if (teams[j].proj + teams[j].sd * Z[o + j] + (shift === j ? delta : 0) < my) below++;
+        }
+        if (below >= need) hits++;
+      }
+      return hits / N;
+    };
+    const pMed = beat(-1, 0);
+    const dMed = new Float64Array(n);
+    if (medianGames) for (let j = 0; j < n; j++) dMed[j] = (beat(j, step) - beat(j, -step)) / (2 * step);
+    for (let j = 0; j < n; j++) dWins[j] += dMed[j];
+    return { pWin, pMed, dWins };
+  }
+
+  async function loadLeague(lg, userId, season, ctx) {
     const s = lg.settings || {};
     const [rosters, users] = await Promise.all([get(`/league/${lg.league_id}/rosters`), get(`/league/${lg.league_id}/users`)]);
     const userMap = new Map(users.map(u => [u.user_id, u]));
@@ -278,7 +457,31 @@ footer a { color: inherit; }
       const sorted = [...scores].sort((a, b) => b - a);
       const apW = scores.filter((p, i) => ms[i].roster_id !== me.roster_id && my > p).length;
       const apT = scores.filter((p, i) => ms[i].roster_id !== me.roster_id && my === p).length;
-      weeks.push({
+
+      let outlook = null;
+      if (live && ctx) {
+        const teams = ms.map(m => teamProjection(m, lg.scoring_settings || {}, ctx));
+        const iMe = ms.indexOf(me), iOpp = opp ? ms.indexOf(opp) : -1;
+        const odds = weekOdds(teams, iMe, iOpp, s.league_average_match === 1);
+        // A player's leverage: how far a one-standard-deviation game from him moves your expected wins.
+        const players = [];
+        teams.forEach((t, j) => {
+          const role = j === iMe ? "you" : j === iOpp ? "opp" : "league";
+          for (const p of t.players) {
+            const impact = odds.dWins[j] * p.sd;
+            if (Math.abs(impact) >= 0.004) players.push({ ...p, role, impact, owner: teamName(userMap, rosterById.get(ms[j].roster_id)) });
+          }
+        });
+        players.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
+        outlook = {
+          my: teams[iMe].proj, opp: iOpp >= 0 ? teams[iOpp].proj : null,
+          med: median(teams.map(t => t.proj)), pWin: odds.pWin, pMed: odds.pMed,
+          expWins: (odds.pWin ?? 0) + (s.league_average_match === 1 ? odds.pMed : 0),
+          maxWins: (iOpp >= 0 ? 1 : 0) + (s.league_average_match === 1 ? 1 : 0),
+          players
+        };
+      }
+      weeks.push({ outlook,
         week: w, live, regular: w <= lastRegular,
         my, med, high: sorted[0], low: sorted[sorted.length - 1],
         weekRank: sorted.indexOf(my) + 1, teams: scores.length,
@@ -316,7 +519,7 @@ footer a { color: inherit; }
     const ws = weeks.filter(w => w.regular || w.live);
     if (!ws.length) return `<p class="status">No scored weeks yet.</p>`;
     const W = 480, H = 150, padL = 30, padB = 18, padT = 8, padR = 4;
-    const max = Math.max(...ws.map(w => Math.max(w.my, w.high || 0)), 10);
+    const max = Math.max(...ws.map(w => Math.max(w.my, w.high || 0, w.outlook?.my || 0, w.outlook?.med || 0)), 10);
     const top = Math.ceil(max / 25) * 25;
     const y = v => padT + (H - padT - padB) * (1 - v / top);
     const slot = (W - padL - padR) / ws.length;
@@ -333,10 +536,49 @@ footer a { color: inherit; }
       const col = w.live ? "var(--accent)" : w.vsMed === "W" ? "var(--good)" : w.vsMed === "L" ? "var(--bad)" : "var(--even)";
       bars += `<rect x="${cx - bw / 2}" y="${y(w.my)}" width="${bw}" height="${Math.max(0, y(0) - y(w.my))}" fill="${col}" rx="2" opacity="${w.live ? .75 : 1}"><title>Week ${w.week}: ${f2(w.my)} vs median ${f2(w.med)}${w.live ? " (in progress)" : ""}</title></rect>`;
       meds += `<line x1="${cx - bw / 2 - 5}" x2="${cx + bw / 2 + 5}" y1="${y(w.med)}" y2="${y(w.med)}" stroke="var(--median)" stroke-width="2"/>`;
+      if (w.outlook) {
+        bars += `<rect x="${cx - bw / 2}" y="${y(w.outlook.my)}" width="${bw}" height="${Math.max(0, y(0) - y(w.outlook.my))}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="3 2" rx="2"><title>Week ${w.week} projected: ${f1(w.outlook.my)} vs projected median ${f1(w.outlook.med)}</title></rect>`;
+        meds += `<line x1="${cx - bw / 2 - 5}" x2="${cx + bw / 2 + 5}" y1="${y(w.outlook.med)}" y2="${y(w.outlook.med)}" stroke="var(--median)" stroke-width="2" stroke-dasharray="3 2"/>`;
+      }
       labels += `<text x="${cx}" y="${H - 4}" text-anchor="middle">${w.week}</text>`;
     });
     return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly score versus league median">${g}${range}${bars}${meds}${labels}</svg></div>
-      <div class="legend"><span><i style="background:var(--good)"></i>Beat median</span><span><i style="background:var(--bad)"></i>Below median</span><span><i style="background:var(--accent)"></i>In progress</span><span><i class="ln"></i>League median</span><span><i style="background:var(--line)"></i>League low–high</span></div>`;
+      <div class="legend"><span><i style="background:var(--good)"></i>Beat median</span><span><i style="background:var(--bad)"></i>Below median</span><span><i style="background:var(--accent)"></i>In progress (dashed: projected)</span><span><i class="ln"></i>League median</span><span><i style="background:var(--line)"></i>League low–high</span></div>`;
+  }
+
+  const pctRound = p => p == null ? "–" : p > 0.995 ? ">99%" : p < 0.005 ? "<1%" : Math.round(p * 100) + "%";
+  const oddsPill = p => `<span class="pill ${p >= 0.6 ? "W" : p <= 0.4 ? "L" : "T"}">${pctRound(p)}</span>`;
+  const ROLE = { you: "your team", opp: "opponent", league: "median rival" };
+
+  function playerCell(p, withOwner) {
+    return `<span class="who"><b>${esc(p.name)}</b> <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span>
+      <span class="line num">${f1(p.actual)} pts · ${p.rem > 0.05 ? `${f1(p.rem)} more proj.` : "done"} · ${esc(p.game)}${withOwner && p.role !== "you" ? ` · <span title="${esc(p.owner)}">${ROLE[p.role]}</span>` : ""}</span></span>`;
+  }
+  function impactBar(v, scale) {
+    const w = Math.min(100, Math.abs(v) / scale * 100);
+    return `<span class="impact num" title="A big or bad game from this player moves your expected wins by about ${Math.abs(v).toFixed(2)}">
+      <span class="bar"><i class="${v > 0 ? "up" : "down"}" style="width:${w.toFixed(0)}%"></i></span>${v > 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</span>`;
+  }
+
+  function outlookPanel(x) {
+    const o = x.liveWeek?.outlook;
+    if (!o) return "";
+    const pro = o.players.filter(p => p.impact > 0).slice(0, 5);
+    const con = o.players.filter(p => p.impact < 0).slice(0, 5);
+    const scale = Math.max(0.01, ...o.players.map(p => Math.abs(p.impact)));
+    const list = ps => ps.length ? ps.map(p => `<li>${playerCell(p, true)}${impactBar(p.impact, scale)}</li>`).join("") : `<li class="none">Nobody left.</li>`;
+    return `<div class="outlook">
+      <div class="odds">
+        <div><span class="k">Projected</span><b class="num">${f1(o.my)}</b><span class="s">vs ${o.opp == null ? "—" : f1(o.opp)}</span></div>
+        <div><span class="k">Win odds</span><b class="num">${pctRound(o.pWin)}</b><span class="s">head-to-head</span></div>
+        <div><span class="k">Proj. median</span><b class="num">${f1(o.med)}</b><span class="s">${signed(o.my - o.med)} for you</span></div>
+        <div><span class="k">Beat median</span><b class="num">${pctRound(o.pMed)}</b><span class="s">${x.medianGames ? "counts as a win" : "for bragging only"}</span></div>
+      </div>
+      <div class="matters">
+        <div><p class="eyebrow">Wk ${x.liveWeek.week} · rooting for</p><ul class="plist">${list(pro)}</ul></div>
+        <div><p class="eyebrow">Rooting against</p><ul class="plist">${list(con)}</ul></div>
+      </div>
+    </div>`;
   }
 
   function weekTable(weeks) {
@@ -386,8 +628,17 @@ footer a { color: inherit; }
       const inProgress = live.some(x => x.liveWeek.live);
       $("weekTitle").textContent = `Week ${wk}${inProgress ? " · in progress" : ""}`;
       $("ticker").innerHTML = live.map(x => {
-        const w = x.liveWeek;
+        const w = x.liveWeek, o = w.outlook;
         const tag = st => w.live ? `<span class="pill ${st === "W" ? "W" : st === "L" ? "L" : "T"}">${st === "W" ? "winning" : st === "L" ? "losing" : "tied"}</span>` : `<span class="pill ${st}">${st}</span>`;
+        if (o) return `<div class="tick">
+          <div class="lname">${esc(x.lg.name)}</div>
+          <div class="score"><b class="num">${f1(o.my)}</b><small>projected · ${f2(w.my)} so far</small></div>
+          <div class="rows proj">
+            <span></span><span class="lbl hd">Now</span><span class="lbl hd">Proj.</span><span class="lbl hd">Odds</span>
+            <span class="lbl">Median</span><span class="num">${f1(w.med)}</span><span class="num">${f1(o.med)}</span>${oddsPill(o.pMed)}
+            <span class="lbl opp" title="${esc(w.oppName || "")}">${w.oppName ? esc(w.oppName) : "No opponent"}</span><span class="num">${w.opp == null ? "—" : f1(w.opp)}</span><span class="num">${o.opp == null ? "—" : f1(o.opp)}</span>${o.pWin == null ? "<span></span>" : oddsPill(o.pWin)}
+          </div>
+        </div>`;
         return `<div class="tick">
           <div class="lname">${esc(x.lg.name)}</div>
           <div class="score"><b class="num">${f2(w.my)}</b><small>${ord(w.weekRank)} of ${w.teams} this week</small></div>
@@ -397,6 +648,31 @@ footer a { color: inherit; }
           </div>
         </div>`;
       }).join("");
+    }
+
+    // Rooting guide across every league
+    const outlooks = live.filter(x => x.liveWeek.outlook);
+    $("rootSec").hidden = !outlooks.length;
+    if (outlooks.length) {
+      const exp = outlooks.reduce((a, x) => a + x.liveWeek.outlook.expWins, 0);
+      const max = outlooks.reduce((a, x) => a + x.liveWeek.outlook.maxWins, 0);
+      $("rootTitle").textContent = `Rooting guide · ${exp.toFixed(1)} of ${max} wins expected this week`;
+      const agg = new Map();
+      for (const x of outlooks) for (const p of x.liveWeek.outlook.players) {
+        const a = agg.get(p.pid) || { ...p, impact: 0, leagues: [] };
+        a.impact += p.impact;
+        a.leagues.push({ name: x.lg.name, impact: p.impact, role: p.role });
+        agg.set(p.pid, a);
+      }
+      const all = [...agg.values()];
+      const pro = all.filter(p => p.impact > 0).sort((a, b) => b.impact - a.impact).slice(0, 8);
+      const con = all.filter(p => p.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 8);
+      const scale = Math.max(0.01, ...all.map(p => Math.abs(p.impact)));
+      const row = p => `<li>${playerCell(p)}
+        <span class="where">${p.leagues.map(l => `<span class="chip ${l.impact > 0 ? "up" : "down"}" title="${l.impact > 0 ? "Helps" : "Hurts"} you in ${esc(l.name)}">${esc(l.name)}</span>`).join("")}</span>
+        ${impactBar(p.impact, scale)}</li>`;
+      $("rootFor").innerHTML = pro.length ? pro.map(row).join("") : `<li class="none">No one left who helps you.</li>`;
+      $("rootAgainst").innerHTML = con.length ? con.map(row).join("") : `<li class="none">No one left who can hurt you.</li>`;
     }
 
     // League cards
@@ -418,6 +694,7 @@ footer a { color: inherit; }
           <div><div class="k">All-play</div><div class="v num">${pctTxt(x.ap)}</div><div class="s">${rec(x.ap)}</div></div>
           <div><div class="k">Points for</div><div class="v num">${f1(x.pf)}</div><div class="s">${ord(x.pfRank)} of ${x.teams}</div></div>
         </div>
+        ${outlookPanel(x)}
         ${chart(x.weeks)}
         ${weekTable(x.weeks)}
       </article>`;
@@ -437,7 +714,11 @@ footer a { color: inherit; }
       const user = await get(`/user/${encodeURIComponent(username)}`);
       if (!user || !user.user_id) throw new Error(`No Sleeper account named "${username}". Check the spelling (it's the username, not the team name).`);
       const leagues = await get(`/user/${user.user_id}/leagues/nfl/${season}`) || [];
-      const data = await Promise.all(leagues.map(l => loadLeague(l, user.user_id, season).catch(e => { console.error(l.name, e); return null; })));
+      let ctx = null;
+      if (String(season) === String(state.league_season) && state.season_type === "regular" && leagues.length) {
+        ctx = await liveContext(season, state.week).catch(e => { console.warn("No projections:", e); return null; });
+      }
+      const data = await Promise.all(leagues.map(l => loadLeague(l, user.user_id, season, ctx).catch(e => { console.error(l.name, e); return null; })));
       render(user, season, data);
       store.set("ml.user", username);
       const anyLive = data.some(x => x?.liveWeek?.live);
