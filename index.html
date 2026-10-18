@@ -169,6 +169,21 @@ button:disabled { opacity: .55; cursor: progress; }
 .impact .bar i.down { background: var(--bad); }
 .note { color: var(--muted); font-size: .8rem; margin: 8px 0 0; max-width: 80ch; }
 
+/* Filters + per-league tags */
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--surface); }
+.seg button { background: transparent; color: var(--muted); border: 0; border-radius: 0; padding: 7px 13px; font-weight: 500; font-size: .88rem; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.seg.small button { padding: 4px 9px; font-size: .76rem; }
+.linkish { background: none; border: 0; padding: 0; color: var(--muted); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; font-size: .88rem; }
+.card .tagrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: -4px; }
+.card .tagrow .hint { font-size: .78rem; color: var(--muted); }
+.card.is-tank { border-style: dashed; }
+.card.is-hide { opacity: .55; }
+.card.is-hide > :not(.head):not(.tagrow) { display: none; }
+.pill.tank { background: var(--surface-2); color: var(--muted); border: 1px dashed var(--muted); }
+
 details.weeks summary { cursor: pointer; color: var(--muted); font-size: .86rem; }
 .tablewrap { overflow-x: auto; margin-top: 8px; }
 table { border-collapse: collapse; width: 100%; font-size: .86rem; }
@@ -209,6 +224,8 @@ footer a { color: inherit; }
     <label id="autoWrap" hidden><input type="checkbox" id="auto" checked> Auto-refresh live scores</label>
     <button type="button" class="ghost" id="refresh" hidden>Refresh</button>
   </div>
+
+  <nav class="filters" id="filters" aria-label="Which leagues to show" hidden></nav>
 
   <section id="summary" hidden>
     <p class="eyebrow" id="summaryTitle">Season totals</p>
@@ -547,7 +564,8 @@ footer a { color: inherit; }
   }
 
   const pctRound = p => p == null ? "–" : p > 0.995 ? ">99%" : p < 0.005 ? "<1%" : Math.round(p * 100) + "%";
-  const oddsPill = p => `<span class="pill ${p >= 0.6 ? "W" : p <= 0.4 ? "L" : "T"}">${pctRound(p)}</span>`;
+  // For a tanking league, low odds are the good outcome, so the colors flip.
+  const oddsPill = (p, invert) => { const q = invert ? 1 - p : p; return `<span class="pill ${q >= 0.6 ? "W" : q <= 0.4 ? "L" : "T"}">${pctRound(p)}</span>`; };
   const ROLE = { you: "your team", opp: "opponent", league: "median rival" };
 
   function playerCell(p, withOwner) {
@@ -563,14 +581,16 @@ footer a { color: inherit; }
   function outlookPanel(x) {
     const o = x.liveWeek?.outlook;
     if (!o) return "";
-    const pro = o.players.filter(p => p.impact > 0).slice(0, 5);
-    const con = o.players.filter(p => p.impact < 0).slice(0, 5);
+    const flip = x.tag === "tank" ? -1 : 1;
+    const ps = o.players.map(p => ({ ...p, impact: p.impact * flip }));
+    const pro = ps.filter(p => p.impact > 0).slice(0, 5);
+    const con = ps.filter(p => p.impact < 0).slice(0, 5);
     const scale = Math.max(0.01, ...o.players.map(p => Math.abs(p.impact)));
-    const list = ps => ps.length ? ps.map(p => `<li>${playerCell(p, true)}${impactBar(p.impact, scale)}</li>`).join("") : `<li class="none">Nobody left.</li>`;
+    const list = arr => arr.length ? arr.map(p => `<li>${playerCell(p, true)}${impactBar(p.impact, scale)}</li>`).join("") : `<li class="none">Nobody left.</li>`;
     return `<div class="outlook">
       <div class="odds">
         <div><span class="k">Projected</span><b class="num">${f1(o.my)}</b><span class="s">vs ${o.opp == null ? "—" : f1(o.opp)}</span></div>
-        <div><span class="k">Win odds</span><b class="num">${pctRound(o.pWin)}</b><span class="s">head-to-head</span></div>
+        <div><span class="k">${x.tag === "tank" ? "Win odds (want low)" : "Win odds"}</span><b class="num">${pctRound(o.pWin)}</b><span class="s">head-to-head</span></div>
         <div><span class="k">Proj. median</span><b class="num">${f1(o.med)}</b><span class="s">${signed(o.my - o.med)} for you</span></div>
         <div><span class="k">Beat median</span><b class="num">${pctRound(o.pMed)}</b><span class="s">${x.medianGames ? "counts as a win" : "for bragging only"}</span></div>
       </div>
@@ -597,13 +617,45 @@ footer a { color: inherit; }
       <tbody>${rows}</tbody></table></div></details>`;
   }
 
+  // ---------- League tags (Compete / Tank / Hide), remembered per Sleeper account in this browser ----------
+  let last = null;                       // last loaded {user, season, data}, so tag changes re-render without refetching
+  let view = store.get("ml.view") || "all";
+  let showHidden = false;
+  const TAGS = { compete: "Compete", tank: "Tank", hide: "Hide" };
+  const getTags = uid => { try { return JSON.parse(store.get("ml.tags." + uid) || "{}"); } catch { return {}; } };
+  function setTag(uid, leagueId, tag) {
+    const t = getTags(uid);
+    if (tag === "compete") delete t[leagueId]; else t[leagueId] = tag;
+    store.set("ml.tags." + uid, JSON.stringify(t));
+  }
+  const rerender = () => last && render(last.user, last.season, last.data);
+
   function render(user, season, data) {
-    const leagues = data.filter(Boolean);
+    last = { user, season, data };
+    const tags = getTags(user.user_id);
+    const every = data.filter(Boolean);
+    every.forEach(x => { x.tag = TAGS[tags[x.lg.league_id]] ? tags[x.lg.league_id] : "compete"; });
+    const shown = every.filter(x => x.tag !== "hide");
+    const hidden = every.filter(x => x.tag === "hide");
+    if (!["all", "compete", "tank"].includes(view)) view = "all";
+    const leagues = shown.filter(x => view === "all" || x.tag === view);
+    const count = t => shown.filter(x => x.tag === t).length;
+
+    $("filters").hidden = !every.length;
+    $("filters").innerHTML = `<div class="seg" role="group" aria-label="Filter leagues">
+        ${[["all", "All", shown.length], ["compete", "Competing", count("compete")], ["tank", "Tanking", count("tank")]]
+          .map(([v, l, n]) => `<button type="button" data-view="${v}" aria-pressed="${view === v}">${l} <span class="num">${n}</span></button>`).join("")}
+      </div>
+      ${hidden.length ? `<button type="button" class="linkish" data-toggle-hidden>${showHidden ? "Hide" : "Show"} ${hidden.length} hidden league${hidden.length === 1 ? "" : "s"}</button>` : ""}`;
+
     $("empty").hidden = leagues.length > 0;
-    if (!leagues.length) {
+    if (!every.length) {
       $("empty").innerHTML = `<strong>${esc(user.display_name)} has no NFL leagues in ${esc(season)}.</strong><br>Try another season from the menu.`;
+    } else if (!leagues.length) {
+      $("empty").innerHTML = `<strong>No leagues in this view.</strong><br>Tag a league as Compete or Tank from its card, or switch the filter above.`;
     }
-    $("summary").hidden = $("leagueSec").hidden = !leagues.length;
+    $("summary").hidden = !leagues.length;
+    $("leagueSec").hidden = !leagues.length && !(showHidden && hidden.length);
 
     // Season totals
     const sum = k => leagues.reduce((r, x) => ({ w: r.w + x[k].w, l: r.l + x[k].l, t: r.t + x[k].t }), { w: 0, l: 0, t: 0 });
@@ -613,7 +665,7 @@ footer a { color: inherit; }
     const best = allDone.reduce((b, w) => (!b || w.my - w.med > b.my - b.med) ? w : b, null);
     $("summaryTitle").textContent = `${season} season · ${user.display_name} · ${leagues.length} league${leagues.length === 1 ? "" : "s"}`;
     $("board").innerHTML = `
-      <div><div class="k">Official record</div><div class="v num">${rec(off)}</div><div class="s">as Sleeper counts it, all leagues</div></div>
+      <div><div class="k">Official record</div><div class="v num">${rec(off)}</div><div class="s">as Sleeper counts it</div></div>
       <div><div class="k">Head-to-head</div><div class="v num">${rec(h2h)}</div><div class="s">${pctTxt(h2h)} win pct</div></div>
       <div><div class="k">Vs. median</div><div class="v num">${rec(med)}</div><div class="s">${pctTxt(med)} · beat the middle score</div></div>
       <div><div class="k">All-play</div><div class="v num">${pctTxt(ap)}</div><div class="s">${rec(ap)} vs every team, every week</div></div>
@@ -630,13 +682,14 @@ footer a { color: inherit; }
       $("ticker").innerHTML = live.map(x => {
         const w = x.liveWeek, o = w.outlook;
         const tag = st => w.live ? `<span class="pill ${st === "W" ? "W" : st === "L" ? "L" : "T"}">${st === "W" ? "winning" : st === "L" ? "losing" : "tied"}</span>` : `<span class="pill ${st}">${st}</span>`;
+        const inv = x.tag === "tank";
         if (o) return `<div class="tick">
-          <div class="lname">${esc(x.lg.name)}</div>
+          <div class="lname">${inv ? '<span class="pill tank">tanking</span> ' : ""}${esc(x.lg.name)}</div>
           <div class="score"><b class="num">${f1(o.my)}</b><small>projected · ${f2(w.my)} so far</small></div>
           <div class="rows proj">
             <span></span><span class="lbl hd">Now</span><span class="lbl hd">Proj.</span><span class="lbl hd">Odds</span>
-            <span class="lbl">Median</span><span class="num">${f1(w.med)}</span><span class="num">${f1(o.med)}</span>${oddsPill(o.pMed)}
-            <span class="lbl opp" title="${esc(w.oppName || "")}">${w.oppName ? esc(w.oppName) : "No opponent"}</span><span class="num">${w.opp == null ? "—" : f1(w.opp)}</span><span class="num">${o.opp == null ? "—" : f1(o.opp)}</span>${o.pWin == null ? "<span></span>" : oddsPill(o.pWin)}
+            <span class="lbl">Median</span><span class="num">${f1(w.med)}</span><span class="num">${f1(o.med)}</span>${oddsPill(o.pMed, inv)}
+            <span class="lbl opp" title="${esc(w.oppName || "")}">${w.oppName ? esc(w.oppName) : "No opponent"}</span><span class="num">${w.opp == null ? "—" : f1(w.opp)}</span><span class="num">${o.opp == null ? "—" : f1(o.opp)}</span>${o.pWin == null ? "<span></span>" : oddsPill(o.pWin, inv)}
           </div>
         </div>`;
         return `<div class="tick">
@@ -654,14 +707,19 @@ footer a { color: inherit; }
     const outlooks = live.filter(x => x.liveWeek.outlook);
     $("rootSec").hidden = !outlooks.length;
     if (outlooks.length) {
-      const exp = outlooks.reduce((a, x) => a + x.liveWeek.outlook.expWins, 0);
-      const max = outlooks.reduce((a, x) => a + x.liveWeek.outlook.maxWins, 0);
-      $("rootTitle").textContent = `Rooting guide · ${exp.toFixed(1)} of ${max} wins expected this week`;
+      const comp = outlooks.filter(x => x.tag !== "tank"), tank = outlooks.filter(x => x.tag === "tank");
+      const sumO = (xs, f) => xs.reduce((a, x) => a + f(x.liveWeek.outlook), 0);
+      const parts = [];
+      if (comp.length) parts.push(`${sumO(comp, o => o.expWins).toFixed(1)} of ${sumO(comp, o => o.maxWins)} wins expected`);
+      if (tank.length) parts.push(`${sumO(tank, o => o.maxWins - o.expWins).toFixed(1)} of ${sumO(tank, o => o.maxWins)} tank losses expected`);
+      $("rootTitle").textContent = `Rooting guide · ${parts.join(" · ")}`;
       const agg = new Map();
       for (const x of outlooks) for (const p of x.liveWeek.outlook.players) {
+        // Tanking: you want to lose, so every player's pull flips.
+        const impact = x.tag === "tank" ? -p.impact : p.impact;
         const a = agg.get(p.pid) || { ...p, impact: 0, leagues: [] };
-        a.impact += p.impact;
-        a.leagues.push({ name: x.lg.name, impact: p.impact, role: p.role });
+        a.impact += impact;
+        a.leagues.push({ name: x.lg.name, impact, role: p.role, tank: x.tag === "tank" });
         agg.set(p.pid, a);
       }
       const all = [...agg.values()];
@@ -669,16 +727,17 @@ footer a { color: inherit; }
       const con = all.filter(p => p.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 8);
       const scale = Math.max(0.01, ...all.map(p => Math.abs(p.impact)));
       const row = p => `<li>${playerCell(p)}
-        <span class="where">${p.leagues.map(l => `<span class="chip ${l.impact > 0 ? "up" : "down"}" title="${l.impact > 0 ? "Helps" : "Hurts"} you in ${esc(l.name)}">${esc(l.name)}</span>`).join("")}</span>
+        <span class="where">${p.leagues.map(l => `<span class="chip ${l.impact > 0 ? "up" : "down"}" title="${l.impact > 0 ? "Helps" : "Hurts"} you in ${esc(l.name)}${l.tank ? " (tanking)" : ""}">${l.tank ? "Tank: " : ""}${esc(l.name)}</span>`).join("")}</span>
         ${impactBar(p.impact, scale)}</li>`;
       $("rootFor").innerHTML = pro.length ? pro.map(row).join("") : `<li class="none">No one left who helps you.</li>`;
       $("rootAgainst").innerHTML = con.length ? con.map(row).join("") : `<li class="none">No one left who can hurt you.</li>`;
     }
 
     // League cards
-    $("leagues").innerHTML = leagues.map(x => {
+    const cards = showHidden ? [...leagues, ...hidden] : leagues;
+    $("leagues").innerHTML = cards.map(x => {
       const av = avatar(x.lg.avatar);
-      return `<article class="card">
+      return `<article class="card is-${x.tag}">
         <div class="head">
           ${av ? `<img src="${av}" alt="" loading="lazy">` : `<div class="ph">${esc((x.lg.name || "?").trim()[0] || "?")}</div>`}
           <div class="t">
@@ -687,6 +746,12 @@ footer a { color: inherit; }
               ${x.medianGames ? '<span class="pill flat">median game on</span>' : ""}</div>
           </div>
           <div class="rank"><b class="num">${ord(x.rank)}</b><span>in standings</span></div>
+        </div>
+        <div class="tagrow">
+          <div class="seg small" role="group" aria-label="Status for ${esc(x.lg.name)}">
+            ${Object.entries(TAGS).map(([t, l]) => `<button type="button" data-league="${esc(x.lg.league_id)}" data-tag="${t}" aria-pressed="${x.tag === t}">${l}</button>`).join("")}
+          </div>
+          <span class="hint">${x.tag === "tank" ? "Tanking: rooting guide flips here" : x.tag === "hide" ? "Left out of totals and the rooting guide" : ""}</span>
         </div>
         <div class="stats">
           <div><div class="k">Record</div><div class="v num">${rec(x.official)}</div><div class="s">${x.medianGames ? "incl. median games" : "head-to-head"}</div></div>
@@ -757,6 +822,19 @@ footer a { color: inherit; }
       if (u) load(u, $("season").value);
     });
     $("season").addEventListener("change", () => { const u = $("username").value.trim(); if (u) load(u, $("season").value); });
+    $("filters").addEventListener("click", e => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.view) { view = b.dataset.view; store.set("ml.view", view); }
+      else if ("toggleHidden" in b.dataset) showHidden = !showHidden;
+      rerender();
+    });
+    $("leagues").addEventListener("click", e => {
+      const b = e.target.closest("button[data-tag]");
+      if (!b || !last) return;
+      setTag(last.user.user_id, b.dataset.league, b.dataset.tag);
+      rerender();
+    });
     $("refresh").addEventListener("click", () => { const u = $("username").value.trim(); if (u) load(u, $("season").value); });
 
     let initial = null;
