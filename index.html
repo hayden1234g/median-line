@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Median Line</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: scoreboard strip up top (season totals), "this week" ticker, then one card per league with a weekly score-vs-median chart. */
+:root {
+  --bg: #f3f5f2;
+  --surface: #ffffff;
+  --surface-2: #e9ede8;
+  --fg: #17211c;
+  --muted: #5d6b63;
+  --line: #d3dbd5;
+  --accent: #d4581b;      /* pylon orange */
+  --accent-ink: #ffffff;
+  --good: #23824f;
+  --good-bg: #dcf0e3;
+  --bad: #be3a34;
+  --bad-bg: #f7dfdc;
+  --even: #8a6a10;
+  --even-bg: #f3ebcf;
+  --median: #17211c;
+  --bar: #9fb3a7;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1512; --surface: #161e1a; --surface-2: #1d2722; --fg: #e6ece8; --muted: #92a199;
+    --line: #2a3530; --accent: #f07a3c; --accent-ink: #1a0d05;
+    --good: #5cc98a; --good-bg: #173226; --bad: #f0786f; --bad-bg: #3a1c1a; --even: #e0c060; --even-bg: #332b12;
+    --median: #e6ece8; --bar: #4a5f53; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1512; --surface: #161e1a; --surface-2: #1d2722; --fg: #e6ece8; --muted: #92a199;
+  --line: #2a3530; --accent: #f07a3c; --accent-ink: #1a0d05;
+  --good: #5cc98a; --good-bg: #173226; --bad: #f0786f; --bad-bg: #3a1c1a; --even: #e0c060; --even-bg: #332b12;
+  --median: #e6ece8; --bar: #4a5f53; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; }
+[hidden] { display: none !important; }
+.num { font-variant-numeric: tabular-nums; }
+
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding-top: 28px; }
+.brand h1 { font: 700 2.6rem/0.95 var(--display); letter-spacing: 0.01em; margin: 0; text-transform: uppercase; }
+.brand h1 span { color: var(--accent); }
+.brand p { margin: 6px 0 0; color: var(--muted); max-width: 46ch; }
+
+form.lookup { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+form.lookup label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+input, select, button { font: inherit; color: inherit; }
+input[type="text"], select {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; min-width: 0;
+}
+input[type="text"] { width: 15rem; max-width: 100%; }
+button {
+  border: 1px solid transparent; border-radius: 6px; padding: 9px 16px; cursor: pointer; font-weight: 600;
+  background: var(--accent); color: var(--accent-ink);
+}
+button.ghost { background: transparent; color: var(--fg); border-color: var(--line); font-weight: 500; }
+button:disabled { opacity: .55; cursor: progress; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.status { color: var(--muted); font-size: .9rem; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.status .err { color: var(--bad); font-weight: 500; }
+
+.eyebrow { font: 600 .78rem/1 var(--body); letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+
+/* Season scoreboard */
+.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.board > div { padding: 16px 18px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 -1px -1px 0; }
+.board .k { font-size: .8rem; color: var(--muted); }
+.board .v { font: 700 2.2rem/1.05 var(--display); }
+.board .s { font-size: .82rem; color: var(--muted); }
+
+/* This week ticker */
+.ticker { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.tick { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; min-width: 0; }
+.tick .lname { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tick .score { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+.tick .score b { font-size: 2rem; font-weight: 700; }
+.tick .score small { font-family: var(--body); color: var(--muted); font-size: .85rem; }
+.tick .rows { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; font-size: .88rem; align-items: center; }
+.tick .rows .lbl { color: var(--muted); }
+.tick .rows .opp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+.pill { display: inline-block; font: 600 .74rem/1 var(--body); letter-spacing: .04em; text-transform: uppercase; padding: 4px 7px; border-radius: 4px; white-space: nowrap; }
+.pill.W { background: var(--good-bg); color: var(--good); }
+.pill.L { background: var(--bad-bg); color: var(--bad); }
+.pill.T { background: var(--even-bg); color: var(--even); }
+.pill.live { background: var(--accent); color: var(--accent-ink); }
+.pill.flat { background: var(--surface-2); color: var(--muted); }
+
+/* League cards */
+.leagues { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 500px), 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.card .head { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.card .head img, .card .head .ph { width: 40px; height: 40px; border-radius: 8px; flex: none; background: var(--surface-2); object-fit: cover; }
+.card .head .ph { display: grid; place-items: center; font: 700 1.1rem var(--display); color: var(--muted); }
+.card .head .t { min-width: 0; }
+.card h3 { margin: 0; font: 700 1.45rem/1.1 var(--display); text-transform: uppercase; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .meta { color: var(--muted); font-size: .84rem; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card .meta .team { color: var(--fg); }
+.rank { margin-left: auto; text-align: right; flex: none; }
+.rank b { font: 700 2rem/1 var(--display); }
+.rank span { display: block; font-size: .75rem; color: var(--muted); }
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.stats > div { background: var(--surface-2); border-radius: 8px; padding: 9px 11px; min-width: 0; }
+.stats .k { font-size: .74rem; color: var(--muted); }
+.stats .v { font: 600 1.35rem/1.15 var(--display); }
+.stats .s { font-size: .74rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 520px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .78rem; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.legend i.ln { height: 2px; vertical-align: 3px; background: var(--median); border-radius: 0; }
+
+details.weeks summary { cursor: pointer; color: var(--muted); font-size: .86rem; }
+.tablewrap { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; }
+th:first-child, td:first-child, th:nth-child(4), td:nth-child(4) { text-align: left; }
+td.opp { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
+
+.empty { border: 1px dashed var(--line); border-radius: 10px; padding: 28px; color: var(--muted); text-align: center; }
+.empty strong { color: var(--fg); }
+footer { color: var(--muted); font-size: .8rem; }
+footer a { color: inherit; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .card, .tick { animation: rise .35s ease both; }
+  @keyframes rise { from { transform: translateY(6px); } to { transform: none; } }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>Median<span>/</span>Line</h1>
+      <p>Every Sleeper league you're in, and how your score stacks up against each league's weekly median.</p>
+    </div>
+    <form class="lookup" id="lookup" autocomplete="off">
+      <label for="username">Sleeper username</label>
+      <input type="text" id="username" name="username" placeholder="Sleeper username" spellcheck="false" required>
+      <label for="season">Season</label>
+      <select id="season" name="season"></select>
+      <button type="submit" id="go">Load leagues</button>
+    </form>
+  </header>
+
+  <div class="status" id="status">
+    <span id="statusText">Enter a Sleeper username to load every league for that account.</span>
+    <label id="autoWrap" hidden><input type="checkbox" id="auto" checked> Auto-refresh live scores</label>
+    <button type="button" class="ghost" id="refresh" hidden>Refresh</button>
+  </div>
+
+  <section id="summary" hidden>
+    <p class="eyebrow" id="summaryTitle">Season totals</p>
+    <div class="board" id="board"></div>
+  </section>
+
+  <section id="weekSec" hidden>
+    <p class="eyebrow" id="weekTitle">This week</p>
+    <div class="ticker" id="ticker"></div>
+  </section>
+
+  <section id="leagueSec" hidden>
+    <p class="eyebrow">Leagues</p>
+    <div class="leagues" id="leagues"></div>
+  </section>
+
+  <div class="empty" id="empty">
+    <strong>No leagues loaded yet.</strong><br>
+    Type a username above. Sleeper data is public, so this works for anyone's account, no login needed.
+  </div>
+
+  <footer>
+    Data from the public <a href="https://docs.sleeper.com/" target="_blank" rel="noopener">Sleeper API</a>.
+    Median = middle score of all teams that week (average of the two middle scores in even-sized leagues). Beating it counts as a median win.
+    Share a link with <span class="num">?user=name</span> on the end to open straight to someone's leagues.
+  </footer>
+</div>
+
+<script>
+(() => {
+  const API = "https://api.sleeper.app/v1";
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} }
+  };
+
+  let state = null;           // NFL state from Sleeper
+  let timer = null;
+  let loading = false;
+
+  async function get(path) {
+    const r = await fetch(API + path);
+    if (!r.ok) throw new Error(`Sleeper returned ${r.status} for ${path}`);
+    return r.json();
+  }
+
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const f1 = n => (n == null || isNaN(n)) ? "–" : n.toFixed(1);
+  const f2 = n => (n == null || isNaN(n)) ? "–" : n.toFixed(2);
+  const signed = n => (n == null || isNaN(n)) ? "–" : (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(1);
+  const rec = r => `${r.w}-${r.l}${r.t ? "-" + r.t : ""}`;
+  const pct = r => { const g = r.w + r.l + r.t; return g ? ((r.w + r.t / 2) / g) : null; };
+  const pctTxt = r => { const p = pct(r); return p == null ? "–" : p.toFixed(3).replace(/^0/, ""); };
+  const ord = n => n + (["th", "st", "nd", "rd"][(n % 100 - 20) % 10] || ["th", "st", "nd", "rd"][n % 100] || "th");
+  const result = (a, b) => a > b ? "W" : a < b ? "L" : "T";
+  const avatar = id => id ? `https://sleepercdn.com/avatars/thumbs/${id}` : null;
+
+  function median(nums) {
+    const s = [...nums].sort((a, b) => a - b);
+    if (!s.length) return null;
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+
+  function teamName(users, roster) {
+    const u = users.get(roster?.owner_id);
+    return u?.metadata?.team_name || u?.display_name || `Team ${roster?.roster_id ?? "?"}`;
+  }
+
+  async function loadLeague(lg, userId, season) {
+    const s = lg.settings || {};
+    const [rosters, users] = await Promise.all([get(`/league/${lg.league_id}/rosters`), get(`/league/${lg.league_id}/users`)]);
+    const userMap = new Map(users.map(u => [u.user_id, u]));
+    const mine = rosters.find(r => r.owner_id === userId || (r.co_owners || []).includes(userId));
+    if (!mine) return null;
+
+    const isCurrent = String(season) === String(state.league_season) && state.season_type === "regular";
+    const startWeek = s.start_week || 1;
+    const lastRegular = s.playoff_week_start ? s.playoff_week_start - 1 : 18;
+    const lastScored = s.last_scored_leg || 0;
+    const curWeek = isCurrent ? state.week : null;
+    const endWeek = Math.min(lastRegular, isCurrent ? curWeek : Math.max(lastScored, lastRegular));
+
+    const weekNums = [];
+    for (let w = startWeek; w <= endWeek; w++) weekNums.push(w);
+    if (curWeek && curWeek > endWeek) weekNums.push(curWeek); // playoffs: still show this week
+    const all = await Promise.all(weekNums.map(w => get(`/league/${lg.league_id}/matchups/${w}`).then(m => [w, m || []])));
+
+    const rosterById = new Map(rosters.map(r => [r.roster_id, r]));
+    const weeks = [];
+    for (const [w, ms] of all) {
+      if (!ms.length) continue;
+      const scores = ms.map(m => m.points || 0);
+      const live = curWeek === w && w > lastScored;
+      if (!live && scores.every(p => p === 0)) continue;
+      const me = ms.find(m => m.roster_id === mine.roster_id);
+      if (!me) continue;
+      const opp = me.matchup_id != null ? ms.find(m => m.matchup_id === me.matchup_id && m.roster_id !== me.roster_id) : null;
+      const med = median(scores);
+      const my = me.points || 0;
+      const sorted = [...scores].sort((a, b) => b - a);
+      const apW = scores.filter((p, i) => ms[i].roster_id !== me.roster_id && my > p).length;
+      const apT = scores.filter((p, i) => ms[i].roster_id !== me.roster_id && my === p).length;
+      weeks.push({
+        week: w, live, regular: w <= lastRegular,
+        my, med, high: sorted[0], low: sorted[sorted.length - 1],
+        weekRank: sorted.indexOf(my) + 1, teams: scores.length,
+        opp: opp ? opp.points || 0 : null,
+        oppName: opp ? teamName(userMap, rosterById.get(opp.roster_id)) : null,
+        h2h: opp ? result(my, opp.points || 0) : null,
+        vsMed: result(my, med),
+        ap: { w: apW, t: apT, l: scores.length - 1 - apW - apT }
+      });
+    }
+
+    const done = weeks.filter(w => !w.live && w.regular);
+    const tally = key => done.reduce((r, w) => (w[key] && (r[{ W: "w", L: "l", T: "t" }[w[key]]]++), r), { w: 0, l: 0, t: 0 });
+    const ap = done.reduce((r, w) => ({ w: r.w + w.ap.w, l: r.l + w.ap.l, t: r.t + w.ap.t }), { w: 0, l: 0, t: 0 });
+
+    const pts = r => (r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100;
+    const winVal = r => (r.settings?.wins || 0) + (r.settings?.ties || 0) / 2;
+    const standing = [...rosters].sort((a, b) => winVal(b) - winVal(a) || pts(b) - pts(a));
+    const byPf = [...rosters].sort((a, b) => pts(b) - pts(a));
+    const ms = mine.settings || {};
+
+    return {
+      lg, medianGames: s.league_average_match === 1, teams: rosters.length, playoffTeams: s.playoff_teams || 0,
+      myTeam: teamName(userMap, mine),
+      official: { w: ms.wins || 0, l: ms.losses || 0, t: ms.ties || 0 },
+      rank: standing.indexOf(mine) + 1,
+      pf: pts(mine), pfRank: byPf.indexOf(mine) + 1,
+      h2h: tally("h2h"), med: tally("vsMed"), ap,
+      avgMargin: done.length ? done.reduce((a, w) => a + (w.my - w.med), 0) / done.length : null,
+      weeks, liveWeek: weeks.find(w => w.live) || (curWeek ? weeks.find(w => w.week === curWeek) : null)
+    };
+  }
+
+  function chart(weeks) {
+    const ws = weeks.filter(w => w.regular || w.live);
+    if (!ws.length) return `<p class="status">No scored weeks yet.</p>`;
+    const W = 480, H = 150, padL = 30, padB = 18, padT = 8, padR = 4;
+    const max = Math.max(...ws.map(w => Math.max(w.my, w.high || 0)), 10);
+    const top = Math.ceil(max / 25) * 25;
+    const y = v => padT + (H - padT - padB) * (1 - v / top);
+    const slot = (W - padL - padR) / ws.length;
+    const bw = Math.min(26, slot * 0.6);
+    let g = "";
+    for (let t = 0; t <= top; t += top > 150 ? 50 : 25) {
+      g += `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"/>`;
+      g += `<text x="${padL - 5}" y="${y(t) + 3}" text-anchor="end">${t}</text>`;
+    }
+    let range = "", bars = "", meds = "", labels = "";
+    ws.forEach((w, i) => {
+      const cx = padL + slot * i + slot / 2;
+      range += `<line x1="${cx}" x2="${cx}" y1="${y(w.high)}" y2="${y(w.low)}" stroke="var(--line)" stroke-width="${bw + 8}" stroke-linecap="butt" opacity=".6"/>`;
+      const col = w.live ? "var(--accent)" : w.vsMed === "W" ? "var(--good)" : w.vsMed === "L" ? "var(--bad)" : "var(--even)";
+      bars += `<rect x="${cx - bw / 2}" y="${y(w.my)}" width="${bw}" height="${Math.max(0, y(0) - y(w.my))}" fill="${col}" rx="2" opacity="${w.live ? .75 : 1}"><title>Week ${w.week}: ${f2(w.my)} vs median ${f2(w.med)}${w.live ? " (in progress)" : ""}</title></rect>`;
+      meds += `<line x1="${cx - bw / 2 - 5}" x2="${cx + bw / 2 + 5}" y1="${y(w.med)}" y2="${y(w.med)}" stroke="var(--median)" stroke-width="2"/>`;
+      labels += `<text x="${cx}" y="${H - 4}" text-anchor="middle">${w.week}</text>`;
+    });
+    return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly score versus league median">${g}${range}${bars}${meds}${labels}</svg></div>
+      <div class="legend"><span><i style="background:var(--good)"></i>Beat median</span><span><i style="background:var(--bad)"></i>Below median</span><span><i style="background:var(--accent)"></i>In progress</span><span><i class="ln"></i>League median</span><span><i style="background:var(--line)"></i>League low–high</span></div>`;
+  }
+
+  function weekTable(weeks) {
+    const rows = [...weeks].reverse().map(w => `<tr>
+      <td>Wk ${w.week}${w.live ? ' <span class="pill live">live</span>' : ""}</td>
+      <td class="num">${f2(w.my)}</td>
+      <td class="num">${f2(w.med)}</td>
+      <td class="opp">${w.oppName ? esc(w.oppName) : "—"}</td>
+      <td class="num">${w.opp == null ? "—" : f2(w.opp)}</td>
+      <td>${w.h2h ? `<span class="pill ${w.live ? "flat" : w.h2h}">${w.h2h}</span>` : "—"}</td>
+      <td><span class="pill ${w.live ? "flat" : w.vsMed}">${w.vsMed}</span></td>
+      <td class="num">${ord(w.weekRank)}/${w.teams}</td>
+    </tr>`).join("");
+    return `<details class="weeks"><summary>Week by week</summary><div class="tablewrap"><table>
+      <thead><tr><th>Week</th><th>You</th><th>Median</th><th>Opponent</th><th>Opp</th><th>H2H</th><th>Med</th><th>Rank</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></details>`;
+  }
+
+  function render(user, season, data) {
+    const leagues = data.filter(Boolean);
+    $("empty").hidden = leagues.length > 0;
+    if (!leagues.length) {
+      $("empty").innerHTML = `<strong>${esc(user.display_name)} has no NFL leagues in ${esc(season)}.</strong><br>Try another season from the menu.`;
+    }
+    $("summary").hidden = $("leagueSec").hidden = !leagues.length;
+
+    // Season totals
+    const sum = k => leagues.reduce((r, x) => ({ w: r.w + x[k].w, l: r.l + x[k].l, t: r.t + x[k].t }), { w: 0, l: 0, t: 0 });
+    const off = sum("official"), h2h = sum("h2h"), med = sum("med"), ap = sum("ap");
+    const allDone = leagues.flatMap(x => x.weeks.filter(w => !w.live && w.regular));
+    const avgMargin = allDone.length ? allDone.reduce((a, w) => a + w.my - w.med, 0) / allDone.length : null;
+    const best = allDone.reduce((b, w) => (!b || w.my - w.med > b.my - b.med) ? w : b, null);
+    $("summaryTitle").textContent = `${season} season · ${user.display_name} · ${leagues.length} league${leagues.length === 1 ? "" : "s"}`;
+    $("board").innerHTML = `
+      <div><div class="k">Official record</div><div class="v num">${rec(off)}</div><div class="s">as Sleeper counts it, all leagues</div></div>
+      <div><div class="k">Head-to-head</div><div class="v num">${rec(h2h)}</div><div class="s">${pctTxt(h2h)} win pct</div></div>
+      <div><div class="k">Vs. median</div><div class="v num">${rec(med)}</div><div class="s">${pctTxt(med)} · beat the middle score</div></div>
+      <div><div class="k">All-play</div><div class="v num">${pctTxt(ap)}</div><div class="s">${rec(ap)} vs every team, every week</div></div>
+      <div><div class="k">In a playoff spot</div><div class="v num">${leagues.filter(x => x.playoffTeams && x.rank <= x.playoffTeams).length} of ${leagues.length}</div><div class="s">by current standings</div></div>
+      <div><div class="k">Avg. margin over median</div><div class="v num">${signed(avgMargin)}</div><div class="s">${best ? `best: +${f1(best.my - best.med)} in wk ${best.week}` : "points per week"}</div></div>`;
+
+    // This week
+    const live = leagues.filter(x => x.liveWeek);
+    $("weekSec").hidden = !live.length;
+    if (live.length) {
+      const wk = live[0].liveWeek.week;
+      const inProgress = live.some(x => x.liveWeek.live);
+      $("weekTitle").textContent = `Week ${wk}${inProgress ? " · in progress" : ""}`;
+      $("ticker").innerHTML = live.map(x => {
+        const w = x.liveWeek;
+        const tag = st => w.live ? `<span class="pill ${st === "W" ? "W" : st === "L" ? "L" : "T"}">${st === "W" ? "winning" : st === "L" ? "losing" : "tied"}</span>` : `<span class="pill ${st}">${st}</span>`;
+        return `<div class="tick">
+          <div class="lname">${esc(x.lg.name)}</div>
+          <div class="score"><b class="num">${f2(w.my)}</b><small>${ord(w.weekRank)} of ${w.teams} this week</small></div>
+          <div class="rows">
+            <span class="lbl">Median</span><span class="num">${f2(w.med)} <span class="lbl">(${signed(w.my - w.med)})</span></span>${tag(w.vsMed)}
+            <span class="lbl">vs</span><span class="opp num">${w.oppName ? `${esc(w.oppName)} · ${f2(w.opp)}` : "No opponent"}</span>${w.h2h ? tag(w.h2h) : "<span></span>"}
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    // League cards
+    $("leagues").innerHTML = leagues.map(x => {
+      const av = avatar(x.lg.avatar);
+      return `<article class="card">
+        <div class="head">
+          ${av ? `<img src="${av}" alt="" loading="lazy">` : `<div class="ph">${esc((x.lg.name || "?").trim()[0] || "?")}</div>`}
+          <div class="t">
+            <h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3>
+            <div class="meta"><span class="team">${esc(x.myTeam)}</span><span>${x.teams} teams</span>
+              ${x.medianGames ? '<span class="pill flat">median game on</span>' : ""}</div>
+          </div>
+          <div class="rank"><b class="num">${ord(x.rank)}</b><span>in standings</span></div>
+        </div>
+        <div class="stats">
+          <div><div class="k">Record</div><div class="v num">${rec(x.official)}</div><div class="s">${x.medianGames ? "incl. median games" : "head-to-head"}</div></div>
+          <div><div class="k">Vs. median</div><div class="v num">${rec(x.med)}</div><div class="s">${signed(x.avgMargin)} avg/wk</div></div>
+          <div><div class="k">All-play</div><div class="v num">${pctTxt(x.ap)}</div><div class="s">${rec(x.ap)}</div></div>
+          <div><div class="k">Points for</div><div class="v num">${f1(x.pf)}</div><div class="s">${ord(x.pfRank)} of ${x.teams}</div></div>
+        </div>
+        ${chart(x.weeks)}
+        ${weekTable(x.weeks)}
+      </article>`;
+    }).join("");
+  }
+
+  function setStatus(msg, isErr) {
+    $("statusText").innerHTML = isErr ? `<span class="err">${esc(msg)}</span>` : esc(msg);
+  }
+
+  async function load(username, season, quiet) {
+    if (loading) return;
+    loading = true;
+    $("go").disabled = true;
+    if (!quiet) setStatus(`Loading ${username}…`);
+    try {
+      const user = await get(`/user/${encodeURIComponent(username)}`);
+      if (!user || !user.user_id) throw new Error(`No Sleeper account named "${username}". Check the spelling (it's the username, not the team name).`);
+      const leagues = await get(`/user/${user.user_id}/leagues/nfl/${season}`) || [];
+      const data = await Promise.all(leagues.map(l => loadLeague(l, user.user_id, season).catch(e => { console.error(l.name, e); return null; })));
+      render(user, season, data);
+      store.set("ml.user", username);
+      const anyLive = data.some(x => x?.liveWeek?.live);
+      $("autoWrap").hidden = !anyLive;
+      $("refresh").hidden = false;
+      setStatus(`Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${anyLive ? " · live week, scores refresh every 2 minutes" : ""}`);
+      schedule(anyLive, username, season);
+      try {
+        const u = new URL(location.href);
+        if (u.protocol.startsWith("http")) { u.searchParams.set("user", username); history.replaceState(null, "", u); }
+      } catch {}
+    } catch (e) {
+      setStatus(e.message || "Couldn't reach Sleeper. Check your connection and try again.", true);
+    } finally {
+      loading = false;
+      $("go").disabled = false;
+    }
+  }
+
+  function schedule(live, username, season) {
+    clearInterval(timer);
+    if (live) timer = setInterval(() => {
+      if ($("auto").checked && document.visibilityState === "visible") load(username, season, true);
+    }, 120000);
+  }
+
+  async function init() {
+    try { state = await get("/state/nfl"); }
+    catch { state = { league_season: String(new Date().getFullYear()), week: 1, season_type: "off" }; }
+    const cur = +state.league_season;
+    $("season").innerHTML = Array.from({ length: cur - 2017 + 1 }, (_, i) => cur - i).map(y => `<option value="${y}">${y}</option>`).join("");
+
+    $("lookup").addEventListener("submit", e => {
+      e.preventDefault();
+      const u = $("username").value.trim();
+      if (u) load(u, $("season").value);
+    });
+    $("season").addEventListener("change", () => { const u = $("username").value.trim(); if (u) load(u, $("season").value); });
+    $("refresh").addEventListener("click", () => { const u = $("username").value.trim(); if (u) load(u, $("season").value); });
+
+    let initial = null;
+    try { initial = new URLSearchParams(location.search).get("user"); } catch {}
+    initial = initial || store.get("ml.user");
+    if (initial) { $("username").value = initial; load(initial, $("season").value); }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
