@@ -177,6 +177,13 @@ button:disabled { opacity: .55; cursor: progress; }
 .seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
 .seg.small button { padding: 4px 9px; font-size: .76rem; }
 .linkish { background: none; border: 0; padding: 0; color: var(--muted); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; font-size: .88rem; }
+.editbtn { padding: 7px 13px; font-size: .88rem; }
+.manage { flex-basis: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+.manage .note { margin: 0 0 6px; }
+.manage ul { list-style: none; margin: 0; padding: 0; }
+.manage li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.manage li:last-child { border-bottom: 0; }
+.manage .mname { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .tagrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: -4px; }
 .card .tagrow .hint { font-size: .78rem; color: var(--muted); }
 .card.is-tank { border-style: dashed; }
@@ -621,6 +628,7 @@ footer a { color: inherit; }
   let last = null;                       // last loaded {user, season, data}, so tag changes re-render without refetching
   let view = store.get("ml.view") || "all";
   let showHidden = false;
+  let editing = false;
   const TAGS = { compete: "Compete", tank: "Tank", hide: "Hide" };
   const getTags = uid => { try { return JSON.parse(store.get("ml.tags." + uid) || "{}"); } catch { return {}; } };
   function setTag(uid, leagueId, tag) {
@@ -629,6 +637,9 @@ footer a { color: inherit; }
     store.set("ml.tags." + uid, JSON.stringify(t));
   }
   const rerender = () => last && render(last.user, last.season, last.data);
+  const tagSwitch = x => `<div class="seg small" role="group" aria-label="Status for ${esc(x.lg.name)}">
+      ${Object.entries(TAGS).map(([t, l]) => `<button type="button" data-league="${esc(x.lg.league_id)}" data-tag="${t}" aria-pressed="${x.tag === t}">${l}</button>`).join("")}
+    </div>`;
 
   function render(user, season, data) {
     last = { user, season, data };
@@ -646,7 +657,12 @@ footer a { color: inherit; }
         ${[["all", "All", shown.length], ["compete", "Competing", count("compete")], ["tank", "Tanking", count("tank")]]
           .map(([v, l, n]) => `<button type="button" data-view="${v}" aria-pressed="${view === v}">${l} <span class="num">${n}</span></button>`).join("")}
       </div>
-      ${hidden.length ? `<button type="button" class="linkish" data-toggle-hidden>${showHidden ? "Hide" : "Show"} ${hidden.length} hidden league${hidden.length === 1 ? "" : "s"}</button>` : ""}`;
+      <button type="button" class="ghost editbtn" data-toggle-edit aria-expanded="${editing}">${editing ? "Done" : "Edit leagues"}</button>
+      ${hidden.length ? `<button type="button" class="linkish" data-toggle-hidden>${showHidden ? "Hide" : "Show"} ${hidden.length} hidden league${hidden.length === 1 ? "" : "s"}</button>` : ""}
+      ${editing ? `<div class="manage">
+        <p class="note">Mark each league Compete, Tank or Hide. Saved in this browser for ${esc(user.display_name)}.</p>
+        <ul>${every.map(x => `<li><span class="mname">${esc(x.lg.name)}</span>${tagSwitch(x)}</li>`).join("")}</ul>
+      </div>` : ""}`;
 
     $("empty").hidden = leagues.length > 0;
     if (!every.length) {
@@ -748,9 +764,7 @@ footer a { color: inherit; }
           <div class="rank"><b class="num">${ord(x.rank)}</b><span>in standings</span></div>
         </div>
         <div class="tagrow">
-          <div class="seg small" role="group" aria-label="Status for ${esc(x.lg.name)}">
-            ${Object.entries(TAGS).map(([t, l]) => `<button type="button" data-league="${esc(x.lg.league_id)}" data-tag="${t}" aria-pressed="${x.tag === t}">${l}</button>`).join("")}
-          </div>
+          ${tagSwitch(x)}
           <span class="hint">${x.tag === "tank" ? "Tanking: rooting guide flips here" : x.tag === "hide" ? "Left out of totals and the rooting guide" : ""}</span>
         </div>
         <div class="stats">
@@ -827,6 +841,8 @@ footer a { color: inherit; }
       if (!b) return;
       if (b.dataset.view) { view = b.dataset.view; store.set("ml.view", view); }
       else if ("toggleHidden" in b.dataset) showHidden = !showHidden;
+      else if ("toggleEdit" in b.dataset) editing = !editing;
+      else if (b.dataset.tag && last) setTag(last.user.user_id, b.dataset.league, b.dataset.tag);
       rerender();
     });
     $("leagues").addEventListener("click", e => {
