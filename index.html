@@ -54,6 +54,7 @@ body {
   padding-block: 0 48px;
 }
 .wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; }
+.wrap > * { min-width: 0; }
 [hidden] { display: none !important; }
 .num { font-variant-numeric: tabular-nums; }
 
@@ -191,6 +192,26 @@ button:disabled { opacity: .55; cursor: progress; }
 .card.is-hide > :not(.head):not(.tagrow) { display: none; }
 .pill.tank { background: var(--surface-2); color: var(--muted); border: 1px dashed var(--muted); }
 
+/* Full player list */
+.allp { margin-top: 14px; }
+.allp > summary { cursor: pointer; font-weight: 600; padding: 10px 0; }
+.ptools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 4px 0 8px; }
+.ptools input[type="search"] { width: 16rem; max-width: 100%; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.ptable th button { background: none; border: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.ptable th button[aria-sort="descending"]::after { content: " ↓"; }
+.ptable th button[aria-sort="ascending"]::after { content: " ↑"; }
+.ptable td { vertical-align: middle; }
+.ptable td.pn { text-align: left; }
+.ptable td.pn .lbl, .ptable td.lbl { color: var(--muted); font-size: .8rem; }
+.ptable td.lbl { text-align: left; }
+.ptable td.up { color: var(--good); }
+.ptable td.down { color: var(--bad); }
+.ptable td.lg { text-align: left; white-space: normal; min-width: 12rem; }
+.ptable td.lg .chip { display: inline-block; margin: 1px 2px; }
+.ptable th:nth-child(2), .ptable td:nth-child(2), .ptable th:last-child { text-align: left; }
+.ptable th:nth-child(4), .ptable td:nth-child(4) { text-align: right; }
+
 details.weeks summary { cursor: pointer; color: var(--muted); font-size: .86rem; }
 .tablewrap { overflow-x: auto; margin-top: 8px; }
 table { border-collapse: collapse; width: 100%; font-size: .86rem; }
@@ -251,6 +272,34 @@ footer a { color: inherit; }
       <div><h2>Root against</h2><ul class="plist" id="rootAgainst"></ul></div>
     </div>
     <p class="note">Ranked by how much a big or bad game from each player moves your expected wins this week, added up across all your leagues. Includes your opponents' players, plus every other team's players in leagues with a median game. Players whose games are over drop off.</p>
+
+    <details class="allp" id="allp">
+      <summary id="allpSum">Every player in your matchups this week</summary>
+      <div class="ptools">
+        <label class="sr" for="pq">Search players</label>
+        <input type="search" id="pq" placeholder="Search player or team" autocomplete="off">
+        <div class="seg small" id="pf" role="group" aria-label="Show">
+          <button type="button" data-pf="all" aria-pressed="true">All</button>
+          <button type="button" data-pf="up" aria-pressed="false">Helps you</button>
+          <button type="button" data-pf="down" aria-pressed="false">Hurts you</button>
+        </div>
+      </div>
+      <div class="tablewrap">
+        <table class="ptable">
+          <thead><tr>
+            <th><button type="button" data-sort="name">Player</button></th>
+            <th>Game</th>
+            <th><button type="button" data-sort="actual">Pts</button></th>
+            <th><button type="button" data-sort="rem">Left</button></th>
+            <th><button type="button" data-sort="net" title="Points already scored for you (+) or against you (−), all leagues">Net pts</button></th>
+            <th><button type="button" data-sort="impact" title="How much a big or bad rest-of-game from him moves your expected wins">Leverage</button></th>
+            <th>Leagues</th>
+          </tr></thead>
+          <tbody id="pbody"></tbody>
+        </table>
+      </div>
+      <p class="note">Net pts: points he's already put up on your teams, minus points he's scored for your opponents (flipped in tanking leagues). Leverage: how much he can still swing your expected wins. Median rivals count toward leverage only, in leagues with a median game.</p>
+    </details>
   </section>
 
   <section id="leagueSec" hidden>
@@ -493,7 +542,7 @@ footer a { color: inherit; }
           const role = j === iMe ? "you" : j === iOpp ? "opp" : "league";
           for (const p of t.players) {
             const impact = odds.dWins[j] * p.sd;
-            if (Math.abs(impact) >= 0.004) players.push({ ...p, role, impact, owner: teamName(userMap, rosterById.get(ms[j].roster_id)) });
+            if (role !== "league" || Math.abs(impact) >= 0.004) players.push({ ...p, role, impact, owner: teamName(userMap, rosterById.get(ms[j].roster_id)) });
           }
         });
         players.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
@@ -585,6 +634,32 @@ footer a { color: inherit; }
       <span class="bar"><i class="${v > 0 ? "up" : "down"}" style="width:${w.toFixed(0)}%"></i></span>${v > 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</span>`;
   }
 
+  // Full cross-league player list
+  let allPlayers = [];
+  const pState = { key: "impact", dir: -1, filter: "all", q: "" };
+  function renderPlayers() {
+    const q = pState.q.trim().toLowerCase();
+    const helps = p => p.impact > 0.0005 || (Math.abs(p.impact) <= 0.0005 && p.net > 0);
+    const hurts = p => p.impact < -0.0005 || (Math.abs(p.impact) <= 0.0005 && p.net < 0);
+    let rows = allPlayers.filter(p =>
+      (pState.filter === "all" || (pState.filter === "up" ? helps(p) : hurts(p))) &&
+      (!q || `${p.name} ${p.pos} ${p.team || ""}`.toLowerCase().includes(q)));
+    const k = pState.key, d = pState.dir;
+    rows.sort((a, b) => k === "name" ? d * a.name.localeCompare(b.name) : d * ((a[k] || 0) - (b[k] || 0)) || (b.net - a.net));
+    const scale = Math.max(0.01, ...allPlayers.map(p => Math.abs(p.impact)));
+    $("allpSum").textContent = `Every player in your matchups this week (${allPlayers.length})`;
+    $("pbody").innerHTML = rows.length ? rows.map(p => `<tr>
+      <td class="pn"><b>${esc(p.name)}</b> <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span></td>
+      <td class="lbl">${esc(p.game)}</td>
+      <td class="num">${f1(p.actual)}</td>
+      <td class="num">${p.rem > 0.05 ? f1(p.rem) : "—"}</td>
+      <td class="num ${p.net > 0.05 ? "up" : p.net < -0.05 ? "down" : ""}">${Math.abs(p.net) < 0.05 ? "0.0" : signed(p.net)}</td>
+      <td>${Math.abs(p.impact) > 0.0005 ? impactBar(p.impact, scale) : '<span class="lbl">done</span>'}</td>
+      <td class="lg">${p.leagues.map(l => `<span class="chip ${l.side > 0 ? "up" : "down"}" title="${l.side > 0 ? "Helps" : "Hurts"} you in ${esc(l.name)}${l.tank ? " (tanking)" : ""}${l.role === "league" ? " (median rival)" : l.role === "opp" ? " (opponent)" : ""}">${l.tank ? "Tank: " : ""}${esc(l.name)}</span>`).join("")}</td>
+    </tr>`).join("") : `<tr><td colspan="7" class="lbl">No players match.</td></tr>`;
+    document.querySelectorAll(".ptable [data-sort]").forEach(b => b.setAttribute("aria-sort", b.dataset.sort === k ? (d < 0 ? "descending" : "ascending") : "none"));
+  }
+
   function outlookPanel(x) {
     const o = x.liveWeek?.outlook;
     if (!o) return "";
@@ -673,19 +748,21 @@ footer a { color: inherit; }
     $("summary").hidden = !leagues.length;
     $("leagueSec").hidden = !leagues.length && !(showHidden && hidden.length);
 
-    // Season totals
-    const sum = k => leagues.reduce((r, x) => ({ w: r.w + x[k].w, l: r.l + x[k].l, t: r.t + x[k].t }), { w: 0, l: 0, t: 0 });
+    // Season totals: tanking leagues stay out, unless you're looking at the Tanking tab.
+    const tankedOut = view === "tank" ? 0 : leagues.filter(x => x.tag === "tank").length;
+    const counted = view === "tank" ? leagues : leagues.filter(x => x.tag !== "tank");
+    const sum = k => counted.reduce((r, x) => ({ w: r.w + x[k].w, l: r.l + x[k].l, t: r.t + x[k].t }), { w: 0, l: 0, t: 0 });
     const off = sum("official"), h2h = sum("h2h"), med = sum("med"), ap = sum("ap");
-    const allDone = leagues.flatMap(x => x.weeks.filter(w => !w.live && w.regular));
+    const allDone = counted.flatMap(x => x.weeks.filter(w => !w.live && w.regular));
     const avgMargin = allDone.length ? allDone.reduce((a, w) => a + w.my - w.med, 0) / allDone.length : null;
     const best = allDone.reduce((b, w) => (!b || w.my - w.med > b.my - b.med) ? w : b, null);
-    $("summaryTitle").textContent = `${season} season · ${user.display_name} · ${leagues.length} league${leagues.length === 1 ? "" : "s"}`;
-    $("board").innerHTML = `
+    $("summaryTitle").textContent = `${season} season · ${user.display_name} · ${counted.length} ${view === "tank" ? "tanking " : ""}league${counted.length === 1 ? "" : "s"}${tankedOut ? ` · ${tankedOut} tanking left out` : ""}`;
+    $("board").innerHTML = !counted.length ? `<div><div class="k">Nothing to total</div><div class="s">Every league here is tanking. Open the Tanking tab to see their totals.</div></div>` : `
       <div><div class="k">Official record</div><div class="v num">${rec(off)}</div><div class="s">as Sleeper counts it</div></div>
       <div><div class="k">Head-to-head</div><div class="v num">${rec(h2h)}</div><div class="s">${pctTxt(h2h)} win pct</div></div>
       <div><div class="k">Vs. median</div><div class="v num">${rec(med)}</div><div class="s">${pctTxt(med)} · beat the middle score</div></div>
       <div><div class="k">All-play</div><div class="v num">${pctTxt(ap)}</div><div class="s">${rec(ap)} vs every team, every week</div></div>
-      <div><div class="k">In a playoff spot</div><div class="v num">${leagues.filter(x => x.playoffTeams && x.rank <= x.playoffTeams).length} of ${leagues.length}</div><div class="s">by current standings</div></div>
+      <div><div class="k">In a playoff spot</div><div class="v num">${counted.filter(x => x.playoffTeams && x.rank <= x.playoffTeams).length} of ${counted.length}</div><div class="s">by current standings</div></div>
       <div><div class="k">Avg. margin over median</div><div class="v num">${signed(avgMargin)}</div><div class="s">${best ? `best: +${f1(best.my - best.med)} in wk ${best.week}` : "points per week"}</div></div>`;
 
     // This week
@@ -732,21 +809,26 @@ footer a { color: inherit; }
       const agg = new Map();
       for (const x of outlooks) for (const p of x.liveWeek.outlook.players) {
         // Tanking: you want to lose, so every player's pull flips.
-        const impact = x.tag === "tank" ? -p.impact : p.impact;
-        const a = agg.get(p.pid) || { ...p, impact: 0, leagues: [] };
+        const flip = x.tag === "tank" ? -1 : 1;
+        const impact = p.impact * flip;
+        const side = (p.role === "you" ? 1 : -1) * flip;          // +1: his points help you
+        const a = agg.get(p.pid) || { ...p, impact: 0, net: 0, leagues: [] };
         a.impact += impact;
-        a.leagues.push({ name: x.lg.name, impact, role: p.role, tank: x.tag === "tank" });
+        if (p.role !== "league") a.net += side * p.actual;        // points already scored for (+) or against (−) you
+        a.leagues.push({ name: x.lg.name, impact, side, role: p.role, tank: x.tag === "tank" });
         agg.set(p.pid, a);
       }
       const all = [...agg.values()];
+      allPlayers = all;
       const pro = all.filter(p => p.impact > 0).sort((a, b) => b.impact - a.impact).slice(0, 8);
       const con = all.filter(p => p.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 8);
       const scale = Math.max(0.01, ...all.map(p => Math.abs(p.impact)));
       const row = p => `<li>${playerCell(p)}
-        <span class="where">${p.leagues.map(l => `<span class="chip ${l.impact > 0 ? "up" : "down"}" title="${l.impact > 0 ? "Helps" : "Hurts"} you in ${esc(l.name)}${l.tank ? " (tanking)" : ""}">${l.tank ? "Tank: " : ""}${esc(l.name)}</span>`).join("")}</span>
+        <span class="where">${p.leagues.map(l => `<span class="chip ${l.side > 0 ? "up" : "down"}" title="${l.side > 0 ? "Helps" : "Hurts"} you in ${esc(l.name)}${l.tank ? " (tanking)" : ""}">${l.tank ? "Tank: " : ""}${esc(l.name)}</span>`).join("")}</span>
         ${impactBar(p.impact, scale)}</li>`;
       $("rootFor").innerHTML = pro.length ? pro.map(row).join("") : `<li class="none">No one left who helps you.</li>`;
       $("rootAgainst").innerHTML = con.length ? con.map(row).join("") : `<li class="none">No one left who can hurt you.</li>`;
+      renderPlayers();
     }
 
     // League cards
@@ -850,6 +932,19 @@ footer a { color: inherit; }
       if (!b || !last) return;
       setTag(last.user.user_id, b.dataset.league, b.dataset.tag);
       rerender();
+    });
+    $("pq").addEventListener("input", e => { pState.q = e.target.value; renderPlayers(); });
+    $("pf").addEventListener("click", e => {
+      const b = e.target.closest("[data-pf]"); if (!b) return;
+      pState.filter = b.dataset.pf;
+      $("pf").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+      renderPlayers();
+    });
+    document.querySelector(".ptable thead").addEventListener("click", e => {
+      const b = e.target.closest("[data-sort]"); if (!b) return;
+      if (pState.key === b.dataset.sort) pState.dir *= -1;
+      else { pState.key = b.dataset.sort; pState.dir = b.dataset.sort === "name" ? 1 : -1; }
+      renderPlayers();
     });
     $("refresh").addEventListener("click", () => { const u = $("username").value.trim(); if (u) load(u, $("season").value); });
 
