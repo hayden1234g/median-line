@@ -900,6 +900,16 @@ footer a { color: inherit; }
     const off = sum("official"), h2h = sum("h2h"), med = sum("med"), ap = sum("ap");
     const medLeagues = counted.filter(x => x.medianGames);
     const medReal = medLeagues.reduce((r, x) => ({ w: r.w + x.med.w, l: r.l + x.med.l, t: r.t + x.med.t }), { w: 0, l: 0, t: 0 });
+    // This week's record if every game ends at its projected final (median games only where they count).
+    const projO = counted.map(x => x.liveWeek?.outlook).filter(o => o?.pMed != null);
+    const projRec = { w: 0, l: 0, t: 0 };
+    const tallyP = (a, b) => projRec[a > b ? "w" : a < b ? "l" : "t"]++;
+    for (const o of projO) {
+      if (o.opp != null) tallyP(o.my, o.opp);
+      if (o.medianGames) tallyP(o.my, o.med);
+    }
+    const projExp = projO.reduce((a, o) => a + o.expWins, 0);
+    const projWeek = counted.find(x => x.liveWeek?.outlook)?.liveWeek.week;
     const allDone = counted.flatMap(x => x.weeks.filter(w => !w.live && w.regular));
     const avgMargin = allDone.length ? allDone.reduce((a, w) => a + w.my - w.med, 0) / allDone.length : null;
     const best = allDone.reduce((b, w) => (!b || w.my - w.med > b.my - b.med) ? w : b, null);
@@ -911,7 +921,8 @@ footer a { color: inherit; }
       <div><div class="k">Vs. median, all leagues</div><div class="v num">${rec(med)}</div><div class="s">${pctTxt(med)} · if every league had one</div></div>
       <div><div class="k">All-play</div><div class="v num">${pctTxt(ap)}</div><div class="s">${rec(ap)} vs every team, every week</div></div>
       <div><div class="k">In a playoff spot</div><div class="v num">${counted.filter(x => x.playoffTeams && x.rank <= x.playoffTeams).length} of ${counted.length}</div><div class="s">by current standings</div></div>
-      <div><div class="k">Avg. margin over median</div><div class="v num">${signed(avgMargin)}</div><div class="s">${best ? `best: +${f1(best.my - best.med)} in wk ${best.week}` : "points per week"}</div></div>`;
+      <div><div class="k">Avg. margin over median</div><div class="v num">${signed(avgMargin)}</div><div class="s">${best ? `best: +${f1(best.my - best.med)} in wk ${best.week}` : "points per week"}</div></div>
+      ${projO.length ? `<div><div class="k">Week ${projWeek} projected record</div><div class="v num">${rec(projRec)}</div><div class="s">by projected finals · ${projExp.toFixed(1)} wins expected</div></div>` : ""}`;
 
     // This week
     const live = leagues.filter(x => x.liveWeek);
