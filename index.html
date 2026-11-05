@@ -1215,7 +1215,7 @@ footer a { color: inherit; }
       const pl = meta?.player;
       const pos = pl?.fantasy_positions?.length ? pl.fantasy_positions : [pl?.position || (isNaN(pid) ? "DEF" : "?")];
       let ros = 0; for (const v2 of pts) ros += v2;
-      v = { pid, name: playerName(meta, pid), pos, team: meta?.team || pl?.team || (isNaN(pid) ? pid : ""), pts, ros, inj: pl?.injury_status || null };
+      v = { pid, name: playerName(meta, pid), pos, team: meta?.team || pl?.team || (isNaN(pid) ? pid : ""), pts, ros, inj: pl?.injury_status || null, first: pl?.first_name || "", last: pl?.last_name || "", ppos: pl?.position || pos[0] };
       info.set(pid, v);
       return v;
     };
@@ -1237,7 +1237,8 @@ footer a { color: inherit; }
     // Free agents: projected players nobody in this league rosters.
     const rostered = new Set(x.rosters.flatMap(r => [...(r.players || []), ...(r.reserve || []), ...(r.taxi || [])]));
     const all = new Set(); for (const m of projWeeks) for (const id of m.keys()) all.add(id);
-    const fas = [...all].filter(id => !rostered.has(id)).map(pi).filter(v => v.ros > 0 && v.pos.some(q => used.has(q))).sort((a, b) => b.ros - a.ros);
+    const allFas = [...all].filter(id => !rostered.has(id)).map(pi).filter(v => v.pos.some(q => used.has(q)));
+    const fas = allFas.filter(v => v.ros > 0).sort((a, b) => b.ros - a.ros);
     // Replacement level: the 2nd-best free agent at each position.
     const repl = {};
     for (const q of used) { const list = fas.filter(v => v.pos.includes(q)); repl[q] = list[1]?.ros ?? list[0]?.ros ?? 0; }
@@ -1249,7 +1250,7 @@ footer a { color: inherit; }
       const total = wk.reduce((a, [t]) => a + t, 0);
       return { rid: r.roster_id, pool, wk, total, ppw: weeks.length ? total / weeks.length : 0, r };
     });
-    return { weeks, pi, lineup, seasonPts, fas, repl, overRepl, teams };
+    return { weeks, pi, lineup, seasonPts, fas, allFas, repl, overRepl, teams };
   }
 
   async function leagueSchedule(x) {
@@ -1318,6 +1319,50 @@ footer a { color: inherit; }
       team: rids.map((rid, i) => ({ rid, playoff: playoff[i] / S, bye: bye[i] / S, seed: seed[i] / S, last: lastPl[i] / S })),
       me, swing: { winH: rate(cond.hW), loseH: rate(cond.hL), winM: rate(cond.mW), loseM: rate(cond.mL) }
     };
+  }
+
+  // ESPN's percent rostered: Sleeper doesn't publish one. Catches players who are owned nearly
+  // everywhere, so they never trend, but happen to be free in one of your leagues.
+  const MUST_MIN = 50;      // rostered in at least this share of ESPN leagues
+  const ESPN_POS = { 1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DEF" };
+  const normName = t => String(t || "").toLowerCase().replace(/[^a-z ]/g, "").replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "").replace(/\s/g, "");
+  let ownCache = null;
+
+  function rosteredPct(season) {
+    if (ownCache?.season === season) return ownCache.promise;
+    const promise = fetch(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${season}/players?scoringPeriodId=0&view=players_wl`,
+      { headers: { "X-Fantasy-Filter": JSON.stringify({ filterActive: { value: true } }) } })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("ESPN " + r.status)))
+      .then(rows => {
+        const byPos = new Map(), byName = new Map(), def = new Map();
+        for (const r of rows) {
+          const pos = ESPN_POS[r.defaultPositionId], pct = r.ownership?.percentOwned;
+          if (!pos || pct == null) continue;
+          if (pos === "DEF") { def.set(normName(String(r.fullName).replace("D/ST", "")), pct); continue; }
+          const k = normName(r.fullName);
+          byPos.set(`${k}|${pos}`, Math.max(pct, byPos.get(`${k}|${pos}`) || 0));
+          byName.set(k, Math.max(pct, byName.get(k) || 0));
+        }
+        return v => {
+          if (v.ppos === "DEF") return def.get(normName(v.last)) ?? null;
+          const k = normName(`${v.first} ${v.last}`);
+          return byPos.get(`${k}|${v.ppos}`) ?? byName.get(k) ?? null;
+        };
+      })
+      .catch(e => { console.warn("No rostered percentages:", e); return null; });
+    ownCache = { season, promise };
+    return promise;
+  }
+
+  // Free agents here who are rostered in most leagues, whether or not they'd start for you.
+  function mustRosterFor(x, model, pctOf, trend) {
+    if (!pctOf) return null;
+    const mine = x.rosters.find(r => r.roster_id === x.myRosterId);
+    const pool = poolOf(mine), base = model.seasonPts(pool), seen = {};
+    return model.allFas.map(v => ({ v, pct: pctOf(v) })).filter(a => a.pct >= MUST_MIN).sort((a, b) => b.pct - a.pct)
+      // kickers and defenses are streamed, so they don't get to crowd out everyone else
+      .filter(a => { const q = a.v.ppos; if (q !== "K" && q !== "DEF") return true; seen[q] = (seen[q] || 0) + 1; return seen[q] <= 2; })
+      .slice(0, 8).map(a => ({ ...a, gain: model.seasonPts([...pool, a.v.pid]) - base, trend: trend.get(a.v.pid) || 0 }));
   }
 
   function addsFor(x, model, trend) {
@@ -1471,11 +1516,12 @@ footer a { color: inherit; }
       if (!weeks.length) return { unavailable: "The fantasy season is over, so there's nothing left to project." };
       const idp = leagues.some(x => (x.lg.roster_positions || []).some(q => ["DL", "LB", "DB", "IDP_FLEX"].includes(q)));
       const positions = ["QB", "RB", "WR", "TE", "K", "DEF", ...(idp ? ["DL", "LB", "DB"] : [])];
-      const [projWeeks, trending, scheds, dyns] = await Promise.all([
+      const [projWeeks, trending, scheds, dyns, pctOf] = await Promise.all([
         Promise.all(weeks.map(w => weekProjections(season, w, positions))),
         get("/players/nfl/trending/add?lookback_hours=24&limit=300").catch(() => []),
         Promise.all(leagues.map(x => leagueSchedule(x).catch(() => []))),
-        Promise.all(leagues.map(x => dynastyFor(x).catch(e => { console.warn("No dynasty values for", x.lg.name, e); return null; })))
+        Promise.all(leagues.map(x => dynastyFor(x).catch(e => { console.warn("No dynasty values for", x.lg.name, e); return null; }))),
+        rosteredPct(season)
       ]);
       const trend = new Map((trending || []).map(t => [t.player_id, t.count]));
       const out = new Map();
@@ -1484,7 +1530,7 @@ footer a { color: inherit; }
         try {
           const model = buildModel(x, projWeeks, weeks);
           const dyn = dyns[i];
-          out.set(x.lg.league_id, { model, dyn, odds: playoffSim(x, model, scheds[i]), adds: addsFor(x, model, trend), trades: dyn ? dynastyTradesFor(x, model, dyn) : tradesFor(x, model) });
+          out.set(x.lg.league_id, { model, dyn, odds: playoffSim(x, model, scheds[i]), adds: addsFor(x, model, trend), must: mustRosterFor(x, model, pctOf, trend), pctOf, trades: dyn ? dynastyTradesFor(x, model, dyn) : tradesFor(x, model) });
         } catch (e) { console.error("Season model failed for", x.lg.name, e); }
         await new Promise(r => setTimeout(r, 0));   // let the page breathe between leagues
       }
@@ -1552,8 +1598,13 @@ footer a { color: inherit; }
     const mineRoster = x.rosters.find(z => z.roster_id === x.myRosterId);
     const faab = x.settings.waiver_type === 2 ? (x.settings.waiver_budget || 0) - (mineRoster.settings?.waiver_budget_used || 0) : null;
     const who = v => `${nm(v)} <span class="ptiny">${esc(v.pos[0])}${v.team && v.pos[0] !== "DEF" ? " · " + esc(v.team) : ""}${v.inj ? " · " + esc(v.inj) : ""}</span>`;
+    const must = r.must == null ? `<li><span class="none">ESPN's rostered numbers didn't load. Try Refresh in a minute.</span></li>`
+      : r.must.length ? r.must.map(a => `<li><span class="what">${a.pct >= 75 ? '<span class="verb add">Must</span>' : ""}${who(a.v)}
+        <span class="sub">${a.v.ros > 0 ? `${f1(a.v.ros)} ROS pts · ${a.gain > 0.5 ? `+${f1(a.gain)} to your lineup` : "wouldn't start for you"}` : "no projection right now, likely injured"}${a.trend ? ` · ${a.trend.toLocaleString()} adds in 24h` : ""}</span></span>
+        <span class="gain num">${a.pct.toFixed(0)}%<small>rostered on ESPN</small></span></li>`).join("")
+      : `<li><span class="none">Nobody rostered in more than ${MUST_MIN}% of leagues is free here.</span></li>`;
     const adds = r.adds.length ? r.adds.map(a => `<li><span class="what"><span class="verb add">Add</span>${who(a.v)}
-        <span class="sub">${f1(a.v.ros)} ROS pts${a.trend ? ` · ${a.trend.toLocaleString()} adds in 24h` : ""}${a.drop ? ` · <span class="verb drop">Drop</span>${esc(a.drop.name)} (${f1(a.drop.ros)})` : " · open roster spot"}</span></span>
+        <span class="sub">${f1(a.v.ros)} ROS pts${r.pctOf?.(a.v) != null ? ` · ${r.pctOf(a.v).toFixed(0)}% rostered` : ""}${a.trend ? ` · ${a.trend.toLocaleString()} adds in 24h` : ""}${a.drop ? ` · <span class="verb drop">Drop</span>${esc(a.drop.name)} (${f1(a.drop.ros)})` : " · open roster spot"}</span></span>
         <span class="gain num">+${f1(a.net)}<small>lineup pts ROS</small></span></li>`).join("")
       : `<li><span class="none">No free agent improves your projected lineup right now.</span></li>`;
     const trades = r.trades.length ? r.trades.map(t => t.dv != null ? `<li><span class="what"><span class="verb give">Give</span>${who(t.give)} <span class="verb get">Get</span>${who(t.get)}
@@ -1567,9 +1618,26 @@ footer a { color: inherit; }
         <h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3>
         <div class="meta"><span>${esc(x.myTeam)}</span>${x.tag === "tank" ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}${r.dyn ? ": trades by dynasty value" : ": ROS value only"}</span>` : ""}${faab != null ? `<span>FAAB left: <b class="num">$${faab}</b></span>` : ""}</div>
       </div>
+      <div><p class="eyebrow">Should be rostered</p><ul class="moves">${must}</ul></div>
       <div><p class="eyebrow">Recommended adds</p><ul class="moves">${adds}</ul></div>
       <div><p class="eyebrow">Trade ideas</p><ul class="moves">${trades}</ul></div>
     </article>`;
+  }
+
+  function mustSummary(have, res) {
+    const agg = new Map();
+    for (const x of have) for (const a of res.out.get(x.lg.league_id).must || []) {
+      if (a.v.ppos === "K" || a.v.ppos === "DEF") continue;
+      const e = agg.get(a.v.pid) || { ...a, lgs: [] };
+      e.lgs.push(x.lg.name);
+      agg.set(a.v.pid, e);
+    }
+    const top = [...agg.values()].sort((a, b) => b.pct - a.pct).slice(0, 8);
+    if (!top.length) return "";
+    return `<section class="card2" data-sec="Should be rostered"><h2>Free in your leagues, rostered almost everywhere else</h2>
+      <p class="ptiny">Percent rostered comes from ESPN leagues. These guys rarely show up as trending because hardly anyone can add them.</p>
+      <ul class="moves">${top.map(a => `<li><span class="what">${nm(a.v)} <span class="ptiny">${esc(a.v.ppos)}${a.v.team ? " · " + esc(a.v.team) : ""}${a.v.inj ? " · " + esc(a.v.inj) : ""}</span>
+        <span class="sub">free in ${esc(a.lgs.join(", "))}</span></span><span class="gain num">${a.pct.toFixed(0)}%<small>rostered</small></span></li>`).join("")}</ul></section>`;
   }
 
   async function renderSeasonTabs() {
@@ -1596,6 +1664,7 @@ footer a { color: inherit; }
     } else {
       $("movesBody").innerHTML = `<section class="panel">
         <p class="lede">Ranked by how much each move raises your projected best-lineup points for ${span}. Adds look at every free agent with a projection; drops come from your bench, never your IR. Trade ideas are one-for-one swaps where both teams' projected lineups improve, so the other manager has a reason to say yes. In dynasty and keeper leagues, trade ideas are ranked instead by the dynasty value you gain (FantasyCalc trade values), still only where their projected lineup improves and yours doesn't get worse; adds stay rest-of-season.</p>
+        ${mustSummary(have, res)}
         <div class="scards">${have.map(x => movesCard(x, res.out.get(x.lg.league_id))).join("")}</div>
       </section>`;
     }
