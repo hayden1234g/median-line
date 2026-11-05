@@ -3,65 +3,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
 <title>Median Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: scoreboard strip up top (season totals), "this week" ticker, then one card per league with a weekly score-vs-median chart. */
+/* Same dark palette as the hoops assistant. Sticky header + hotbar, drawer for everything, jump bar per page. */
 :root {
-  --bg: #f3f5f2;
-  --surface: #ffffff;
-  --surface-2: #e9ede8;
-  --fg: #17211c;
-  --muted: #5d6b63;
-  --line: #d3dbd5;
-  --accent: #d4581b;      /* pylon orange */
-  --accent-ink: #ffffff;
-  --good: #23824f;
-  --good-bg: #dcf0e3;
-  --bad: #be3a34;
-  --bad-bg: #f7dfdc;
-  --even: #8a6a10;
-  --even-bg: #f3ebcf;
-  --median: #17211c;
-  --bar: #9fb3a7;
+  --bg: #0f1115; --surface: #171a21; --surface-2: #1e222b; --fg: #e7e9ee; --muted: #8b93a3; --line: #2a2f3a;
+  --accent: #ff7a1a; --accent-ink: #111111; --blue: #5aa9ff;
+  --good: #3ecf8e; --good-bg: rgba(62, 207, 142, .15);
+  --bad: #ff5d6c; --bad-bg: rgba(255, 93, 108, .15);
+  --even: #f5c04a; --even-bg: rgba(245, 192, 74, .15);
+  --median: #e7e9ee; --bar: #4a5363;
   --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
-  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0f1512; --surface: #161e1a; --surface-2: #1d2722; --fg: #e6ece8; --muted: #92a199;
-    --line: #2a3530; --accent: #f07a3c; --accent-ink: #1a0d05;
-    --good: #5cc98a; --good-bg: #173226; --bad: #f0786f; --bad-bg: #3a1c1a; --even: #e0c060; --even-bg: #332b12;
-    --median: #e6ece8; --bar: #4a5f53; color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0f1512; --surface: #161e1a; --surface-2: #1d2722; --fg: #e6ece8; --muted: #92a199;
-  --line: #2a3530; --accent: #f07a3c; --accent-ink: #1a0d05;
-  --good: #5cc98a; --good-bg: #173226; --bad: #f0786f; --bad-bg: #3a1c1a; --even: #e0c060; --even-bg: #332b12;
-  --median: #e6ece8; --bar: #4a5f53; color-scheme: dark;
+  --stick: 110px;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
-  background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body);
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: var(--bg); color: var(--fg); font: 14px/1.45 var(--body);
   padding-block: 0 48px;
 }
-.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; }
+.wrap {
+  max-width: 1152px; margin: 16px auto 0; display: grid; gap: 22px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
 .wrap > * { min-width: 0; }
 [hidden] { display: none !important; }
 .num { font-variant-numeric: tabular-nums; }
 
-header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding-top: 28px; }
-.brand h1 { font: 700 2.6rem/0.95 var(--display); letter-spacing: 0.01em; margin: 0; text-transform: uppercase; }
-.brand h1 span { color: var(--accent); }
-.brand p { margin: 6px 0 0; color: var(--muted); max-width: 46ch; }
 
 form.lookup { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 form.lookup label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -213,9 +190,6 @@ button:disabled { opacity: .55; cursor: progress; }
 .ptable th:nth-child(4), .ptable td:nth-child(4) { text-align: right; }
 
 /* Tabs + Season / Moves */
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.tabs button { background: none; color: var(--muted); border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 10px 14px; font: 700 1.15rem/1 var(--display); text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
-.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
 .panel { display: grid; gap: 28px; min-width: 0; }
 .panel > * { min-width: 0; }
 .scards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 500px), 1fr)); gap: 16px; }
@@ -254,6 +228,126 @@ table.roster tfoot td:first-child { max-width: none; white-space: normal; }
 .loading { color: var(--muted); padding: 24px 0; }
 .lede { color: var(--muted); font-size: .88rem; max-width: 80ch; margin: 0; }
 
+/* Header, hotbar, drawer, jump bar */
+.hdr { position: sticky; top: 0; z-index: 5; background: rgba(15, 17, 21, .94); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); padding: calc(10px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); }
+.hdr .top { display: flex; align-items: center; gap: 10px; max-width: 1120px; margin: 0 auto; }
+.hdr .ttl { min-width: 0; flex: 1; }
+.hdr .title { font: 700 1.3rem/1 var(--display); text-transform: uppercase; letter-spacing: .02em; }
+.hdr .title span { color: var(--accent); }
+.hdr .status { font-size: 12px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.burger, .icon { background: none; color: var(--fg); border: 1px solid var(--line); border-radius: 8px; width: 36px; height: 34px; padding: 0; font-size: 18px; line-height: 1; cursor: pointer; flex: none; font-weight: 400; }
+#tabs { display: flex; gap: 4px; margin: 6px auto 0; max-width: 1120px; overflow-x: auto; scrollbar-width: none; }
+#tabs::-webkit-scrollbar { display: none; }
+#tabs button { background: none; color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; font-weight: 500; white-space: nowrap; flex: none; }
+#tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+#scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 20; }
+#drawer { position: fixed; top: 0; bottom: 0; left: 0; width: min(290px, 82vw); background: var(--surface); border-right: 1px solid var(--line); z-index: 21; overflow-y: auto; padding: calc(14px + env(safe-area-inset-top, 0px)) 12px 20px max(12px, env(safe-area-inset-left, 0px)); }
+#drawer .grp { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin: 14px 6px 4px; }
+#drawer .item { display: flex; align-items: center; gap: 6px; border-radius: 8px; }
+#drawer .item.on { background: var(--surface-2); }
+#drawer .go { flex: 1; text-align: left; background: none; border: 0; padding: 10px 8px; color: var(--fg); font-size: 15px; font-weight: 400; }
+#drawer .item.on .go { color: var(--accent); font-weight: 600; }
+#drawer .pin { background: none; border: 0; font-size: 17px; color: var(--muted); padding: 6px 8px; font-weight: 400; }
+#drawer .pin.on { color: var(--even); }
+.subnav { position: sticky; z-index: 4; display: flex; gap: 6px; overflow-x: auto; padding: 8px max(16px, env(safe-area-inset-left, 0px)); background: rgba(15, 17, 21, .94); border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.subnav::-webkit-scrollbar { display: none; }
+.subnav button { flex: none; max-width: 11rem; overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 400; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg); white-space: nowrap; }
+[data-sec] { scroll-margin-top: var(--stick); }
+.pname { cursor: pointer; }
+.pname:hover { color: var(--accent); }
+.setcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; }
+.setcard h2 { margin: 0; font: 700 1.25rem/1 var(--display); text-transform: uppercase; }
+
+/* Live */
+.lcol { display: grid; gap: 14px; }
+.lcol > * { min-width: 0; }
+.lhead { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; color: var(--muted); font-size: .85rem; }
+.lhead b { color: var(--fg); font: 700 1.3rem/1 var(--display); text-transform: uppercase; }
+.games { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.game { flex: none; width: 158px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; color: inherit; text-decoration: none; display: grid; gap: 2px; font-size: .84rem; }
+.game.in { border-color: var(--accent); }
+.game.mine { box-shadow: inset 0 2px 0 var(--blue); }
+.game .tm { display: flex; justify-content: space-between; gap: 6px; }
+.game .tm.ball b::after { content: " \25CF"; color: var(--accent); font-size: .6rem; vertical-align: middle; }
+.game .tm.ball.red b::after { color: var(--bad); }
+.game .gl { color: var(--muted); font-size: .74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.game .gl.yours { color: var(--blue); }
+.card2 { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; min-width: 0; }
+.card2 h2 { margin: 0; font: 700 1.15rem/1 var(--display); text-transform: uppercase; letter-spacing: .02em; }
+.alerts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: .88rem; }
+.alerts li { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
+.feed { list-style: none; margin: 0; padding: 0; display: grid; max-height: 19rem; overflow-y: auto; }
+.feed li { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .86rem; }
+.feed li:last-child { border-bottom: 0; }
+.feed time { color: var(--muted); font-size: .74rem; }
+.feed .fw { min-width: 0; }
+.feed .sub { display: block; color: var(--muted); font-size: .76rem; }
+.feed .fp { font-weight: 700; font-variant-numeric: tabular-nums; }
+.feed .fp.up, .up { color: var(--good); }
+.feed .fp.down, .down { color: var(--bad); }
+.lcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 14px; }
+.lcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; min-width: 0; align-content: start; }
+.lcard.is-tank { border-style: dashed; }
+.lcard > * { min-width: 0; }
+.lcard h3 { margin: 0; font: 700 1.2rem/1.1 var(--display); text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: center; }
+.sb .side { min-width: 0; }
+.sb .side.r { text-align: right; }
+.sb .tn { color: var(--muted); font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb .sc { font: 700 1.9rem/1.05 var(--display); font-variant-numeric: tabular-nums; }
+.sb .pj { color: var(--muted); font-size: .76rem; }
+.sb .vs { color: var(--muted); font-size: .74rem; text-align: center; }
+.oddbar { height: 8px; border-radius: 4px; background: var(--bad-bg); overflow: hidden; }
+.oddbar i { display: block; height: 100%; background: var(--good); }
+.oddrow { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: .82rem; color: var(--muted); align-items: center; }
+.oddrow b { color: var(--fg); }
+.spark { display: block; width: 100%; height: 30px; }
+.lu { display: grid; gap: 0; }
+.lurow { display: grid; grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr); gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); align-items: start; }
+.lurow .sl { color: var(--muted); font-size: .66rem; text-align: center; padding-top: 3px; font-weight: 600; }
+.lp { min-width: 0; font-size: .84rem; }
+.lp.r { text-align: right; }
+.lp .ln { display: flex; gap: 4px; align-items: baseline; justify-content: space-between; }
+.lp.r .ln { flex-direction: row-reverse; }
+.lp .nmw { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp .pts { font-weight: 700; font-variant-numeric: tabular-nums; flex: none; }
+.lp .lm, .lp .ll { color: var(--muted); font-size: .72rem; overflow-wrap: anywhere; }
+.lp .ll { color: var(--fg); opacity: .85; }
+.lp.pre .pts, .lp.bye .pts { color: var(--muted); font-weight: 400; }
+.lp.none { color: var(--muted); font-style: italic; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; background: transparent; border: 1px solid var(--muted); }
+.dot.in { background: var(--accent); border-color: var(--accent); }
+.dot.post { background: var(--muted); }
+.dot.ball { background: var(--good); border-color: var(--good); }
+.dot.red { background: var(--bad); border-color: var(--bad); }
+@media (prefers-reduced-motion: no-preference) { .dot.in { animation: pulse 2s infinite; } @keyframes pulse { 50% { opacity: .35; } } }
+
+/* Player game log */
+#pl { width: min(640px, calc(100vw - 24px)); max-height: 86vh; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+#pl::backdrop { background: rgba(0, 0, 0, .6); }
+.plhead { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.plhead h3 { margin: 0; font: 700 1.5rem/1.05 var(--display); text-transform: uppercase; }
+.plstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 8px; margin: 10px 0; }
+.plstats div { background: var(--surface-2); border-radius: 8px; padding: 7px 9px; display: grid; }
+.plstats b { font: 600 1.2rem/1.1 var(--display); }
+.plstats span { color: var(--muted); font-size: .72rem; }
+table.log td.ln2 { text-align: left; white-space: normal; min-width: 8rem; font-size: .78rem; }
+table.log th:nth-child(3) { text-align: left; }
+
+/* Players, Trends, Best games */
+.pvbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pvbar select, .pvbar input { max-width: 100%; min-width: 0; }
+.pvbar input[type="search"] { width: 11rem; }
+.tight th, .tight td { padding: 5px 6px; }
+td.pcell { text-align: left; white-space: normal; min-width: 0; }
+td.pcell .lbl { display: block; color: var(--muted); font-size: .72rem; }
+table.tight th button { background: none; border: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+table.tight th button[aria-sort="descending"]::after { content: " \2193"; }
+table.tight th button[aria-sort="ascending"]::after { content: " \2191"; }
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 14px; }
+.twocol > * { min-width: 0; }
+@media (max-width: 560px) { .opt { display: none; } }
+
 details.weeks summary { cursor: pointer; color: var(--muted); font-size: .86rem; }
 .tablewrap { overflow-x: auto; margin-top: 8px; }
 table { border-collapse: collapse; width: 100%; font-size: .86rem; }
@@ -274,47 +368,39 @@ footer a { color: inherit; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <div class="brand">
-      <h1>Median<span>/</span>Line</h1>
-      <p>Every Sleeper league you're in, and how your score stacks up against each league's weekly median.</p>
+<header class="hdr" id="hdr">
+  <div class="top">
+    <button type="button" class="burger" id="burger" aria-label="All sections">&#9776;</button>
+    <div class="ttl">
+      <div class="title">Median<span>/</span>Line</div>
+      <span class="status sub" id="status"><span id="statusText">Enter a Sleeper username to load your leagues.</span></span>
     </div>
-    <form class="lookup" id="lookup" autocomplete="off">
-      <label for="username">Sleeper username</label>
-      <input type="text" id="username" name="username" placeholder="Sleeper username" spellcheck="false" required>
-      <label for="season">Season</label>
-      <select id="season" name="season"></select>
-      <button type="submit" id="go">Load leagues</button>
-    </form>
-  </header>
-
-  <div class="status" id="status">
-    <span id="statusText">Enter a Sleeper username to load every league for that account.</span>
-    <label id="autoWrap" hidden><input type="checkbox" id="auto" checked> Auto-refresh live scores</label>
-    <button type="button" class="ghost" id="refresh" hidden>Refresh</button>
+    <button type="button" class="icon" id="refresh" aria-label="Refresh now" title="Refresh now" hidden>&#8635;</button>
   </div>
+  <nav id="tabs" role="tablist" aria-label="Pinned sections" hidden></nav>
+</header>
+<div class="subnav" id="subnav" hidden></div>
+<div id="scrim" hidden></div>
+<aside id="drawer" hidden aria-label="All sections"></aside>
+<dialog id="pl" aria-label="Player game log"></dialog>
 
+<div class="wrap" id="wrap">
   <nav class="filters" id="filters" aria-label="Which leagues to show" hidden></nav>
 
-  <section id="summary" hidden>
+  <div class="panel" id="panel-live" role="tabpanel"><div id="liveBody"></div></div>
+
+  <div class="panel" id="panel-week" role="tabpanel" hidden>
+  <section id="summary" data-sec="Totals" hidden>
     <p class="eyebrow" id="summaryTitle">Season totals</p>
     <div class="board" id="board"></div>
   </section>
 
-  <nav class="tabs" id="tabs" role="tablist" aria-label="Views" hidden>
-    <button type="button" role="tab" data-tab="week" id="tab-week">This week</button>
-    <button type="button" role="tab" data-tab="season" id="tab-season">Season</button>
-    <button type="button" role="tab" data-tab="moves" id="tab-moves">Moves</button>
-  </nav>
-
-  <div class="panel" id="panel-week" role="tabpanel" aria-labelledby="tab-week">
-  <section id="weekSec" hidden>
+  <section id="weekSec" data-sec="Scores" hidden>
     <p class="eyebrow" id="weekTitle">This week</p>
     <div class="ticker" id="ticker"></div>
   </section>
 
-  <section id="rootSec" hidden>
+  <section id="rootSec" data-sec="Rooting guide" hidden>
     <p class="eyebrow" id="rootTitle">Rooting guide</p>
     <div class="root">
       <div><h2>Root for</h2><ul class="plist" id="rootFor"></ul></div>
@@ -351,18 +437,37 @@ footer a { color: inherit; }
     </details>
   </section>
 
-  <section id="leagueSec" hidden>
+  <section id="leagueSec" data-sec="Leagues" hidden>
     <p class="eyebrow">Leagues</p>
     <div class="leagues" id="leagues"></div>
   </section>
   </div>
 
-  <div class="panel" id="panel-season" role="tabpanel" aria-labelledby="tab-season" hidden>
+  <div class="panel" id="panel-players" role="tabpanel" hidden><div id="playersBody"></div></div>
+  <div class="panel" id="panel-trends" role="tabpanel" hidden><div id="trendsBody"></div></div>
+  <div class="panel" id="panel-best" role="tabpanel" hidden><div id="bestBody"></div></div>
+
+  <div class="panel" id="panel-season" role="tabpanel" hidden>
     <div id="seasonBody"></div>
   </div>
 
-  <div class="panel" id="panel-moves" role="tabpanel" aria-labelledby="tab-moves" hidden>
+  <div class="panel" id="panel-moves" role="tabpanel" hidden>
     <div id="movesBody"></div>
+  </div>
+
+  <div class="panel" id="panel-settings" role="tabpanel" hidden>
+    <div class="setcard">
+      <h2>Your Sleeper account</h2>
+      <form class="lookup" id="lookup" autocomplete="off">
+        <label for="username">Sleeper username</label>
+        <input type="text" id="username" name="username" placeholder="Sleeper username" spellcheck="false" required>
+        <label for="season">Season</label>
+        <select id="season" name="season"></select>
+        <button type="submit" id="go">Load leagues</button>
+      </form>
+      <label id="autoWrap" hidden><input type="checkbox" id="auto" checked> Keep scores updating during games</label>
+      <p class="note">Sleeper data is public, so this works for anyone's account with no login. Tag leagues with Edit leagues above. Share a link with <span class="num">?user=name</span> on the end to open straight to someone's leagues.</p>
+    </div>
   </div>
 
   <div class="empty" id="empty">
@@ -371,9 +476,8 @@ footer a { color: inherit; }
   </div>
 
   <footer>
-    Data from the public <a href="https://docs.sleeper.com/" target="_blank" rel="noopener">Sleeper API</a>.
+    Data from the public <a href="https://docs.sleeper.com/" target="_blank" rel="noopener">Sleeper API</a>, game clocks from ESPN.
     Median = middle score of all teams that week (average of the two middle scores in even-sized leagues). Beating it counts as a median win.
-    Share a link with <span class="num">?user=name</span> on the end to open straight to someone's leagues.
   </footer>
 </div>
 
@@ -421,6 +525,15 @@ footer a { color: inherit; }
 
   // ---------- Projections ----------
   // Live context for one NFL week: Sleeper player projections plus how much of each team's game is left.
+  const doneWeeks = new Map();     // "league-week" -> finished matchups, so live refreshes stay light
+  let liveCtx = null;              // live context from the latest load
+  async function weekMatchups(id, w, lastScored) {
+    const k = `${id}-${w}`;
+    if (doneWeeks.has(k)) return [w, doneWeeks.get(k)];
+    const m = await get(`/league/${id}/matchups/${w}`) || [];
+    if (w <= lastScored && m.length) doneWeeks.set(k, m);
+    return [w, m];
+  }
   const projCache = new Map();
   const ESPN_TEAM = { WSH: "WAS" };
 
@@ -436,8 +549,16 @@ footer a { color: inherit; }
       projCache.set(key, proj);
     }
 
+    // Live box score lines for every player this week.
+    const stats = new Map();
+    try {
+      const pos = ["QB", "RB", "WR", "TE", "K", "DEF", "DL", "LB", "DB"].map(p => "position%5B%5D=" + p).join("&");
+      const r = await fetch(`https://api.sleeper.app/stats/nfl/${season}/${week}?season_type=regular&${pos}`);
+      if (r.ok) for (const x of await r.json()) stats.set(x.player_id, x);
+    } catch {}
+
     // Game clock: ESPN scoreboard first (has the clock), Sleeper's schedule as a fallback (status only).
-    const games = new Map(), opps = new Map();
+    const games = new Map(), opps = new Map(), board = [];
     try {
       const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week=${week}&dates=${season}`);
       const d = await r.json();
@@ -455,24 +576,29 @@ footer a { color: inherit; }
           rem = Math.max(0, Math.min(1, left / 60));
           label = /half/i.test(type.detail || "") ? "Half" : st.period >= 5 ? "OT" : `Q${st.period} ${st.displayClock}`;
         }
-        const abs = (e.competitions?.[0]?.competitors || []).map(c => c.team?.abbreviation).filter(Boolean).map(ab => ESPN_TEAM[ab] || ab);
-        for (const ab of abs) games.set(ab, { rem, label });
+        const comp = e.competitions?.[0] || {}, sit = comp.situation || {};
+        const teams = (comp.competitors || []).filter(c => c.team?.abbreviation).map(c => ({ id: c.team.id, ab: ESPN_TEAM[c.team.abbreviation] || c.team.abbreviation, score: c.score, home: c.homeAway === "home" }));
+        const abs = teams.map(t => t.ab);
+        const poss = teams.find(t => t.id === sit.possession)?.ab || null;
+        const state = type.state || "pre";
+        for (const ab of abs) games.set(ab, { rem, label, state, ball: state === "in" && poss === ab, red: !!sit.isRedZone });
         if (abs.length === 2) { opps.set(abs[0], abs[1]); opps.set(abs[1], abs[0]); }
+        board.push({ id: e.id, date: e.date, state, label, rem, away: teams.find(t => !t.home), home: teams.find(t => t.home), poss, red: !!sit.isRedZone, down: sit.shortDownDistanceText || sit.downDistanceText || "", last: sit.lastPlay?.text || "" });
       }
     } catch {}
     if (!games.size) {
       try {
         const r = await fetch(`https://api.sleeper.app/schedule/nfl/regular/${season}`);
         for (const g of (await r.json()).filter(g => g.week === week)) {
-          const v = g.status === "complete" ? { rem: 0, label: "Final" } : g.status === "in_game" ? { rem: 0.5, label: "Live" } : { rem: 1, label: "Upcoming" };
+          const v = g.status === "complete" ? { rem: 0, label: "Final", state: "post" } : g.status === "in_game" ? { rem: 0.5, label: "Live", state: "in" } : { rem: 1, label: "Upcoming", state: "pre" };
           games.set(g.home, v); games.set(g.away, v);
           opps.set(g.home, g.away); opps.set(g.away, g.home);
         }
       } catch {}
     }
     return {
-      proj: proj.map,
-      game: team => games.get(team) || { rem: 0, label: games.size ? "Bye" : "?" },
+      proj: proj.map, stats, board,
+      game: team => games.get(team) || { rem: 0, label: games.size ? "Bye" : "?", state: "bye" },
       opp: team => opps.get(team) || null
     };
   }
@@ -485,12 +611,14 @@ footer a { color: inherit; }
   }
 
   // Projected final for one lineup: points already scored + the unplayed share of each starter's projection.
-  function teamProjection(m, scoring, ctx) {
+  function teamProjection(m, scoring, ctx, slotNames = []) {
     let remaining = 0, variance = 0;
-    const players = [];
-    for (const pid of m.starters || []) {
-      if (!pid || pid === "0") continue;
-      const x = ctx.proj.get(pid);
+    const players = [], slots = [];
+    (m.starters || []).forEach((pid, i) => {
+      const slot = slotNames[i] || "";
+      if (!pid || pid === "0") { slots.push({ slot, p: null }); return; }
+      const sr = ctx.stats.get(pid);
+      const x = ctx.proj.get(pid) || sr;
       const team = x?.team || x?.player?.team || (isNaN(pid) ? pid : null);
       const g = ctx.game(team);
       const full = x ? Math.max(0, Object.entries(x.stats || {}).reduce((a, [k, v]) => a + v * (scoring[k] || 0), 0)) : 0;
@@ -498,9 +626,13 @@ footer a { color: inherit; }
       // Rough spread of a fantasy score around its projection, shrinking as the game runs out.
       const sd = full > 0 ? Math.sqrt(g.rem) * (0.45 * full + 2) : 0;
       remaining += rem; variance += sd * sd;
-      players.push({ pid, name: playerName(x, pid), pos: x?.player?.position || (isNaN(pid) ? "DEF" : ""), team, actual: m.players_points?.[pid] || 0, full, rem, sd, game: g.label });
-    }
-    return { rid: m.roster_id, now: m.points || 0, proj: (m.points || 0) + remaining, sd: Math.sqrt(variance), players };
+      const pos = x?.player?.position || (isNaN(pid) ? "DEF" : "");
+      const line = sr?.stats?.gp || g.state === "in" || g.state === "post" ? statLine(sr?.stats, pos) : "";
+      const p = { pid, name: playerName(x, pid), pos, team, actual: m.players_points?.[pid] || 0, full, rem, sd, game: g.label, st: g.state, ball: !!g.ball, red: !!g.ball && !!g.red, line, stats: sr?.stats || {}, inj: x?.player?.injury_status || null };
+      players.push(p);
+      slots.push({ slot, p });
+    });
+    return { rid: m.roster_id, now: m.points || 0, proj: (m.points || 0) + remaining, sd: Math.sqrt(variance), players, slots };
   }
 
   // ---------- Correlated week simulation ----------
@@ -647,7 +779,7 @@ footer a { color: inherit; }
     const weekNums = [];
     for (let w = startWeek; w <= endWeek; w++) weekNums.push(w);
     if (curWeek && curWeek > endWeek) weekNums.push(curWeek); // playoffs: still show this week
-    const all = await Promise.all(weekNums.map(w => get(`/league/${lg.league_id}/matchups/${w}`).then(m => [w, m || []])));
+    const all = await Promise.all(weekNums.map(w => weekMatchups(lg.league_id, w, lastScored)));
 
     const rosterById = new Map(rosters.map(r => [r.roster_id, r]));
     const weeks = [];
@@ -667,7 +799,7 @@ footer a { color: inherit; }
 
       let outlook = null;
       if (live && ctx) {
-        const teams = ms.map(m => teamProjection(m, lg.scoring_settings || {}, ctx));
+        const teams = ms.map(m => teamProjection(m, lg.scoring_settings || {}, ctx, (lg.roster_positions || []).filter(q => q !== "BN")));
         const iMe = ms.indexOf(me), iOpp = opp ? ms.indexOf(opp) : -1;
         const medianGames = s.league_average_match === 1;
         // Players listed for this league: yours and your opponent's.
@@ -765,7 +897,7 @@ footer a { color: inherit; }
   const isStack = (direct, impact) => Math.abs(impact) >= 0.02 && direct !== 0 && Math.sign(direct) !== Math.sign(impact);
 
   function playerCell(p, withOwner) {
-    return `<span class="who"><b>${esc(p.name)}</b>${stackTag(p)} <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span>
+    return `<span class="who">${nm(p)}${stackTag(p)} <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span>
       <span class="line num">${f1(p.actual)} pts · ${p.rem > 0.05 ? `${f1(p.rem)} more proj.` : "done"} · ${esc(p.game)}${withOwner && p.role !== "you" ? ` · <span title="${esc(p.owner)}">${ROLE[p.role]}</span>` : ""}</span></span>`;
   }
   function impactBar(v, scale) {
@@ -789,7 +921,7 @@ footer a { color: inherit; }
     const scale = Math.max(0.01, ...allPlayers.map(p => Math.abs(p.impact)));
     $("allpSum").textContent = `Every player in your matchups this week (${allPlayers.length})`;
     $("pbody").innerHTML = rows.length ? rows.map(p => `<tr>
-      <td class="pn"><b>${esc(p.name)}</b>${stackTag(p)} <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span></td>
+      <td class="pn">${nm(p)}${stackTag(p)} <span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}</span></td>
       <td class="lbl">${esc(p.game)}</td>
       <td class="num">${f1(p.actual)}</td>
       <td class="num">${p.rem > 0.05 ? f1(p.rem) : "—"}</td>
@@ -1041,8 +1173,18 @@ footer a { color: inherit; }
     FLEX: ["RB", "WR", "TE"], WRRB_FLEX: ["RB", "WR"], REC_FLEX: ["WR", "TE"],
     SUPER_FLEX: ["QB", "RB", "WR", "TE"], IDP_FLEX: ["DL", "LB", "DB"]
   };
-  const TABS = ["week", "season", "moves"];
-  let tab = TABS.includes(store.get("ml.tab")) ? store.get("ml.tab") : "week";
+  const NAV = [
+    ["This week", [["live", "Live"], ["week", "Matchups"]]],
+    ["Players", [["players", "Players"], ["trends", "Trends"], ["best", "Best games"]]],
+    ["Moves", [["moves", "Adds & trades"]]],
+    ["Season", [["season", "Season"]]],
+    ["Settings", [["settings", "Settings"]]]
+  ];
+  const LABEL = Object.fromEntries(NAV.flatMap(g => g[1]));
+  const TABS = Object.keys(LABEL);
+  let tab = TABS.includes(store.get("ml.tab")) ? store.get("ml.tab") : "live";
+  let hot = (() => { try { const h = JSON.parse(store.get("ml.hotbar")); if (Array.isArray(h) && h.length) return h.filter(k => LABEL[k]); } catch {} return ["live", "week", "players", "moves", "season"]; })();
+  let quietRender = false;         // live refresh: leave the slower tabs (and anything expanded in them) alone
   let seasonCache = null;          // { key, promise } for the loaded account + season
   const rosProj = new Map();       // "season-week-positions" -> Promise<Map(pid -> projection row)>
 
@@ -1371,7 +1513,7 @@ footer a { color: inherit; }
     const sw = o.swing;
     const swingRow = (label, a, b, aL, bL) => a == null || b == null ? "" :
       `<div class="row"><span class="lbl">${label}</span><span>${aL} → <b class="num">${pc(a)}</b></span><span>${bL} → <b class="num">${pc(b)}</b></span><span class="pill ${Math.abs(a - b) >= 0.1 ? "T" : "flat"}">${Math.round(Math.abs(a - b) * 100)}% swing in odds</span></div>`;
-    return `<article class="scard ${tank ? "is-tank" : ""}">
+    return `<article class="scard ${tank ? "is-tank" : ""}" data-sec="${esc(x.lg.name)}">
       <div>
         <h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3>
         <div class="meta"><span>${esc(x.myTeam)}</span>${tank ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}</span>` : ""}${x.medianGames ? '<span class="pill flat">median game on</span>' : ""}</div>
@@ -1398,7 +1540,7 @@ footer a { color: inherit; }
       <details class="weeks"><summary>Your roster, ${d ? "rest of season and dynasty value" : "rest of season"}</summary><div class="tablewrap"><table class="roster">
         <thead><tr><th>Player</th><th>Pos</th>${d ? '<th title="FantasyCalc dynasty trade value">Dynasty</th>' : ""}<th>ROS pts</th><th>Over repl.</th></tr></thead>
         <tbody>${rosterRows.map(v => `<tr>
-          <td>${esc(v.name)}${v.inj ? ` <span class="ptiny">${esc(v.inj)}</span>` : ""}${taxi.has(v.pid) ? ' <span class="ptiny">taxi</span>' : ""}</td><td>${esc(v.pos[0])}${v.team && v.pos[0] !== "DEF" ? " · " + esc(v.team) : ""}</td>
+          <td>${nm(v)}${v.inj ? ` <span class="ptiny">${esc(v.inj)}</span>` : ""}${taxi.has(v.pid) ? ' <span class="ptiny">taxi</span>' : ""}</td><td>${esc(v.pos[0])}${v.team && v.pos[0] !== "DEF" ? " · " + esc(v.team) : ""}</td>
           ${d ? `<td class="num">${d.value(v.pid) ? dv(d.value(v.pid)) : "–"}</td>` : ""}<td class="num">${f1(v.ros)}</td><td class="num">${signed(m.overRepl(v))}</td></tr>`).join("")}</tbody>
         ${d ? `<tfoot><tr><td colspan="2">${myDyn.picks ? "Players" : "Total"}</td><td class="num">${dv(myDyn.players)}</td><td colspan="2"></td></tr>${myDyn.picks ? `<tr><td colspan="2">${d.picks.get(x.myRosterId).length} future picks</td><td class="num">${dv(myDyn.picks)}</td><td colspan="2"></td></tr><tr><td colspan="2">Total</td><td class="num">${dv(myDyn.total)}</td><td colspan="2"></td></tr>` : ""}</tfoot>` : ""}</table></div>
         ${d ? `<p class="ptiny">ROS pts: Sleeper projections for the rest of this season. Dynasty: FantasyCalc trade value (${d.numQbs === 2 ? "superflex" : "1QB"}, ${x.rosters.length} teams, ${d.ppr} PPR), long-term worth on a 0–10,000+ scale${d.kind === "dynasty" ? "; future picks priced by round, not draft slot" : ""}.</p>` : ""}</details>
@@ -1409,7 +1551,7 @@ footer a { color: inherit; }
     const kind = leagueKind(x);
     const mineRoster = x.rosters.find(z => z.roster_id === x.myRosterId);
     const faab = x.settings.waiver_type === 2 ? (x.settings.waiver_budget || 0) - (mineRoster.settings?.waiver_budget_used || 0) : null;
-    const who = v => `<b>${esc(v.name)}</b> <span class="ptiny">${esc(v.pos[0])}${v.team && v.pos[0] !== "DEF" ? " · " + esc(v.team) : ""}${v.inj ? " · " + esc(v.inj) : ""}</span>`;
+    const who = v => `${nm(v)} <span class="ptiny">${esc(v.pos[0])}${v.team && v.pos[0] !== "DEF" ? " · " + esc(v.team) : ""}${v.inj ? " · " + esc(v.inj) : ""}</span>`;
     const adds = r.adds.length ? r.adds.map(a => `<li><span class="what"><span class="verb add">Add</span>${who(a.v)}
         <span class="sub">${f1(a.v.ros)} ROS pts${a.trend ? ` · ${a.trend.toLocaleString()} adds in 24h` : ""}${a.drop ? ` · <span class="verb drop">Drop</span>${esc(a.drop.name)} (${f1(a.drop.ros)})` : " · open roster spot"}</span></span>
         <span class="gain num">+${f1(a.net)}<small>lineup pts ROS</small></span></li>`).join("")
@@ -1420,7 +1562,7 @@ footer a { color: inherit; }
         <span class="sub">with ${esc(x.nameOf(t.rid))} · they gain +${f1(t.them)}</span></span>
         <span class="gain num">+${f1(t.me)}<small>your lineup ROS</small></span></li>`).join("")
       : `<li><span class="none">${r.dyn ? "No one-for-one swap gains you dynasty value while helping their lineup." : "No one-for-one swap helps both lineups by projection."}</span></li>`;
-    return `<article class="scard ${x.tag === "tank" ? "is-tank" : ""}">
+    return `<article class="scard ${x.tag === "tank" ? "is-tank" : ""}" data-sec="${esc(x.lg.name)}">
       <div>
         <h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3>
         <div class="meta"><span>${esc(x.myTeam)}</span>${x.tag === "tank" ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}${r.dyn ? ": trades by dynasty value" : ": ROS value only"}</span>` : ""}${faab != null ? `<span>FAAB left: <b class="num">$${faab}</b></span>` : ""}</div>
@@ -1431,7 +1573,7 @@ footer a { color: inherit; }
   }
 
   async function renderSeasonTabs() {
-    if (tab === "week" || !last) return;
+    if (!["season", "moves"].includes(tab) || !last) return;
     const body = tab === "season" ? $("seasonBody") : $("movesBody");
     const leagues = last.visible || [];
     if (!leagues.length) { body.innerHTML = ""; return; }
@@ -1440,7 +1582,7 @@ footer a { color: inherit; }
     let res;
     try { res = await ensureSeason(); }
     catch (e) { body.innerHTML = `<p class="loading">Couldn't load projections from Sleeper. Try Refresh in a minute.</p>`; return; }
-    if (!res || tab === "week") return;
+    if (!res || !["season", "moves"].includes(tab)) return;
     if (res.unavailable) { body.innerHTML = `<p class="loading">${esc(res.unavailable)}</p>`; return; }
     const span = `weeks ${res.weeks[0]}–${res.weeks[res.weeks.length - 1]}`;
     const have = leagues.filter(x => res.out.has(x.lg.league_id));
@@ -1459,12 +1601,413 @@ footer a { color: inherit; }
     }
   }
 
+  function renderNav() {
+    const cur = last ? tab : "settings";
+    $("tabs").innerHTML = hot.map(k => `<button type="button" role="tab" data-tab="${k}" aria-selected="${k === cur}">${LABEL[k]}</button>`).join("");
+    $("drawer").innerHTML = NAV.map(([g, items]) => `<div class="grp">${g}</div>` + items.map(([k, l]) => `<div class="item ${k === cur ? "on" : ""}">
+        <button type="button" class="go" data-tab="${k}">${l}</button>
+        <button type="button" class="pin ${hot.includes(k) ? "on" : ""}" data-pin="${k}" aria-label="Pin ${l} to the top bar">${hot.includes(k) ? "&#9733;" : "&#9734;"}</button>
+      </div>`).join("")).join("");
+  }
+  const toggleDrawer = open => { $("drawer").hidden = !open; $("scrim").hidden = !open; };
+
+  // Jump bar: one button per section of the current page.
+  function buildSubnav() {
+    const nav = $("subnav"), panel = $("panel-" + (last ? tab : "settings"));
+    const secs = [...panel.querySelectorAll("[data-sec]")].filter(e => e.offsetParent !== null);
+    nav.hidden = secs.length < 2;
+    nav.innerHTML = secs.map((e, i) => `<button type="button" data-i="${i}">${esc(e.dataset.sec)}</button>`).join("");
+    nav._secs = secs;
+    const h = $("hdr").offsetHeight;
+    nav.style.top = h + "px";
+    document.documentElement.style.setProperty("--stick", (h + (nav.hidden ? 8 : 48)) + "px");
+  }
+
   function showTab() {
-    for (const t of TABS) {
-      $("panel-" + t).hidden = t !== tab;
-      $("tab-" + t).setAttribute("aria-selected", t === tab);
+    const cur = last ? tab : "settings";
+    for (const t of TABS) $("panel-" + t).hidden = t !== cur;
+    renderNav();
+    if (cur === "live") renderLive();
+    if (!quietRender) { renderSeasonTabs(); renderPlayerTabs(); }
+    buildSubnav();
+  }
+
+  // ===================== Live =====================
+  const nm = p => `<b class="pname" data-pid="${esc(p.pid)}">${esc(p.name)}</b>`;
+  const SLOT_SHORT = { FLEX: "FLX", SUPER_FLEX: "SF", REC_FLEX: "RFX", WRRB_FLEX: "WRB", IDP_FLEX: "IDP" };
+  const SEVERE = new Set(["Out", "IR", "Sus", "PUP", "NA", "COV", "DNR"]);
+
+  function statLine(st, pos) {
+    if (!st) return "";
+    const n = k => st[k] || 0, td = (k, l = "TD") => n(k) ? `, ${n(k) > 1 ? n(k) + " " : ""}${l}` : "";
+    const pass = n("pass_att") ? `${n("pass_cmp")}/${n("pass_att")}, ${n("pass_yd")} yd${td("pass_td")}${td("pass_int", "INT")}` : "";
+    const rush = n("rush_att") ? `${n("rush_att")} car, ${n("rush_yd")} yd${td("rush_td")}` : "";
+    const rec = n("rec_tgt") || n("rec") ? `${n("rec")}/${n("rec_tgt")} rec, ${n("rec_yd")} yd${td("rec_td")}` : "";
+    let parts;
+    if (pos === "DEF") {
+      parts = [`${n("pts_allow")} PA`, n("sack") ? `${n("sack")} sk` : "", n("int") ? `${n("int")} INT` : "", n("fum_rec") ? `${n("fum_rec")} FR` : "", n("def_td") ? `${n("def_td")} TD` : ""];
+    } else if (pos === "K") {
+      parts = [n("fga") ? `FG ${n("fgm")}/${n("fga")}` : "", n("xpa") ? `XP ${n("xpm")}/${n("xpa")}` : ""];
+    } else parts = pos === "WR" || pos === "TE" ? [rec, rush, pass] : [pass, rush, rec];
+    parts.push(n("fum_lost") ? "fumble lost" : "");
+    return parts.filter(Boolean).join(" · ");
+  }
+
+  // What changed for one player since the last refresh, in words.
+  function statDiff(a = {}, b = {}) {
+    const d = k => (b[k] || 0) - (a[k] || 0), out = [];
+    for (const [k, l] of [["pass_td", "TD pass"], ["rush_td", "rushing TD"], ["rec_td", "receiving TD"], ["def_td", "defensive TD"], ["pass_int", "INT thrown"], ["fum_lost", "fumble lost"], ["fgm", "FG made"], ["int", "INT"], ["sack", "sack"]])
+      if (d(k) > 0) out.push(d(k) > 1 ? `${d(k)} ${l}s` : l);
+    const y = [["pass_yd", "pass"], ["rush_yd", "rush"], ["rec_yd", "rec"]].filter(([k]) => d(k)).map(([k, l]) => `${d(k) > 0 ? "+" : ""}${d(k)} ${l} yd`);
+    return out.concat(out.length ? [] : y).join(", ");
+  }
+
+  let liveFeed = [], prevLive = null, feedFor = null, oddsHist = {};
+  const readJson = (k, d) => { try { return JSON.parse(store.get(k)) || d; } catch { return d; } };
+
+  // Runs after every load: compares each listed player with the last refresh, and logs win odds over time.
+  function trackLive(user, season, data) {
+    const xs = data.filter(x => x?.liveWeek?.outlook?.teams);
+    if (!xs.length) return;
+    const id = `${user.user_id}.${season}.${xs[0].liveWeek.week}`;
+    if (feedFor !== id) {
+      feedFor = id; prevLive = null;
+      liveFeed = readJson("ml.feed." + id, []);
+      oddsHist = readJson("ml.odds." + id, {});
     }
-    renderSeasonTabs();
+    const tags = getTags(user.user_id), now = new Map(), grouped = new Map(), t = Date.now();
+    for (const x of xs) {
+      const flip = tags[x.lg.league_id] === "tank" ? -1 : 1;
+      for (const q of x.liveWeek.outlook.players) {
+        const key = `${x.lg.league_id}:${q.pid}`;
+        now.set(key, { pts: q.actual, stats: q.stats });
+        const was = prevLive?.get(key);
+        if (!was || Math.abs(q.actual - was.pts) < 0.05) continue;
+        const g = grouped.get(q.pid) || { t, pid: q.pid, name: q.name, pos: q.pos, what: statDiff(was.stats, q.stats), net: 0, lgs: [] };
+        const side = (q.role === "you" ? 1 : -1) * flip, delta = q.actual - was.pts;
+        g.net += side * delta;
+        g.lgs.push(`${side * delta >= 0 ? "helps" : "hurts"} in ${x.lg.name}`);
+        grouped.set(q.pid, g);
+      }
+      const o = x.liveWeek.outlook, h = oddsHist[x.lg.league_id] ||= [], top = h[h.length - 1];
+      if (o.pWin != null && (!top || Math.abs(top[1] - o.pWin) > 0.002)) { h.push([t, +o.pWin.toFixed(3)]); if (h.length > 240) h.shift(); }
+    }
+    prevLive = now;
+    if (grouped.size) liveFeed = [...grouped.values()].concat(liveFeed).slice(0, 80);
+    store.set("ml.feed." + id, JSON.stringify(liveFeed));
+    store.set("ml.odds." + id, JSON.stringify(oddsHist));
+  }
+
+  function spark(vals) {
+    if (vals.length < 2) return "";
+    const W = 300, H = 30, y = v => 2 + (H - 4) * (1 - v);
+    const pts = vals.map((v, i) => `${(i / (vals.length - 1) * W).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Win odds over time">
+      <line x1="0" x2="${W}" y1="${y(.5)}" y2="${y(.5)}" stroke="var(--line)" stroke-dasharray="3 3"/>
+      <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+  }
+
+  function luCell(p, right) {
+    if (!p) return `<div class="lp none ${right ? "r" : ""}">Empty</div>`;
+    const left = p.st === "in" && p.rem > 0.05 ? ` · ${f1(p.rem)} left` : p.st === "pre" ? ` · ${f1(p.full)} proj` : "";
+    const dot = `dot ${p.st}${p.ball ? " ball" : ""}${p.red ? " red" : ""}`;
+    const tip = p.red ? "In the red zone" : p.ball ? "Has the ball" : p.st === "in" ? "Playing" : "";
+    return `<div class="lp ${p.st} ${right ? "r" : ""}">
+      <div class="ln"><span class="nmw"><i class="${dot}" title="${tip}"></i>${nm(p)}</span><span class="pts">${f1(p.actual)}</span></div>
+      <div class="lm">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""} · ${esc(p.game)}${left}${p.inj ? " · " + esc(p.inj) : ""}</div>
+      ${p.line ? `<div class="ll">${esc(p.line)}</div>` : ""}
+    </div>`;
+  }
+
+  function liveCard(x) {
+    const w = x.liveWeek, o = w.outlook, me = o.teams[o.iMe], op = o.iOpp >= 0 ? o.teams[o.iOpp] : null;
+    const inv = x.tag === "tank", n = Math.max(me.slots.length, op?.slots.length || 0);
+    const hist = (oddsHist[x.lg.league_id] || []).map(h => h[1]);
+    let rows = "";
+    for (let i = 0; i < n; i++) {
+      const a = me.slots[i], b = op?.slots[i], sl = a?.slot || b?.slot || "";
+      rows += `<div class="lurow">${luCell(a?.p, false)}<div class="sl">${esc(SLOT_SHORT[sl] || sl)}</div>${op ? luCell(b?.p, true) : "<div></div>"}</div>`;
+    }
+    return `<article class="lcard ${inv ? "is-tank" : ""}" data-sec="${esc(x.lg.name)}">
+      <div class="row2"><h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3></div>
+      <div class="sb">
+        <div class="side"><div class="tn">${esc(x.myTeam)}</div><div class="sc">${f1(me.now)}</div><div class="pj">proj ${f1(me.proj)}</div></div>
+        <div class="vs">${inv ? '<span class="pill tank">tank</span>' : "vs"}</div>
+        <div class="side r">${op ? `<div class="tn">${esc(w.oppName || "")}</div><div class="sc">${f1(op.now)}</div><div class="pj">proj ${f1(op.proj)}</div>` : `<div class="tn">No opponent</div>`}</div>
+      </div>
+      ${o.pWin != null ? `<div class="oddbar" role="img" aria-label="Win odds ${pctRound(o.pWin)}"><i style="width:${(o.pWin * 100).toFixed(0)}%"></i></div>` : ""}
+      <div class="oddrow"><span>Win odds <b class="num">${pctRound(o.pWin)}</b></span>
+        <span>Median ${f1(w.med)} → ${f1(o.med)} · beat it <b class="num">${pctRound(o.pMed)}</b>${x.medianGames ? "" : " (no median game)"}</span></div>
+      ${spark(hist)}
+      <div class="lu">${rows}</div>
+    </article>`;
+  }
+
+  function renderLive() {
+    const el = $("liveBody");
+    if (!last) return;
+    const xs = (last.visible || []).filter(x => x.liveWeek?.outlook?.teams), ctx = liveCtx;
+    if (!ctx || !xs.length) {
+      el.innerHTML = `<div class="card2"><h2>Nothing live</h2><p class="lede">${String(last.season) !== String(state.league_season) ? "Live scoring only runs for the current season." : "No week is in progress for these leagues right now. Live opens back up once the next week's matchups are set."}</p></div>`;
+      return;
+    }
+    const wk = xs[0].liveWeek.week, b = ctx.board;
+    const cnt = st => b.filter(g => g.state === st).length;
+    // How many of your players, and your opponents', are in each game.
+    const inGame = new Map();
+    for (const x of xs) for (const q of x.liveWeek.outlook.players) {
+      const c = inGame.get(q.team) || { you: new Set(), opp: new Set() };
+      c[q.role === "you" ? "you" : "opp"].add(q.pid);
+      inGame.set(q.team, c);
+    }
+    const count = (g, k) => [g.away?.ab, g.home?.ab].reduce((a, t) => a + (inGame.get(t)?.[k].size || 0), 0);
+    const order = { in: 0, pre: 1, post: 2 };
+    const games = [...b].sort((p, q) => order[p.state] - order[q.state] || new Date(p.date) - new Date(q.date)).map(g => {
+      const y = count(g, "you"), o = count(g, "opp");
+      const tr = t => t ? `<div class="tm ${g.poss === t.ab ? "ball" : ""} ${g.poss === t.ab && g.red ? "red" : ""}"><b>${esc(t.ab)}</b><span class="num">${g.state === "pre" ? "" : esc(t.score)}</span></div>` : "";
+      return `<a class="game ${g.state} ${y ? "mine" : ""}" href="https://www.espn.com/nfl/game/_/gameId/${esc(g.id)}" target="_blank" rel="noopener">
+        ${tr(g.away)}${tr(g.home)}
+        <div class="gl">${esc(g.label)}${g.state === "in" && g.down ? " · " + esc(g.down) : ""}</div>
+        <div class="gl yours">${y || o ? `${y} yours · ${o} opp` : "&nbsp;"}</div></a>`;
+    }).join("");
+
+    // Starters who won't play, or might not, in games that haven't started.
+    const alerts = [];
+    for (const x of xs) for (const sl of x.liveWeek.outlook.teams[x.liveWeek.outlook.iMe].slots) {
+      if (!sl.p) { alerts.push([2, x.lg.name, `${SLOT_SHORT[sl.slot] || sl.slot} slot is empty`]); continue; }
+      const q = sl.p;
+      if (q.st === "post" || q.st === "in") continue;
+      if (q.st === "bye") alerts.push([2, x.lg.name, `${q.name} is on bye`]);
+      else if (SEVERE.has(q.inj)) alerts.push([2, x.lg.name, `${q.name} is ${q.inj}`]);
+      else if (q.inj) alerts.push([1, x.lg.name, `${q.name} is ${q.inj}`]);
+    }
+    alerts.sort((p, q) => q[0] - p[0]);
+    const alertHtml = alerts.length ? `<section class="card2" data-sec="Alerts"><h2>Check your lineups</h2><ul class="alerts">${alerts.map(([lvl, lg, t]) =>
+      `<li><span class="pill ${lvl > 1 ? "L" : "T"}">${lvl > 1 ? "fix" : "watch"}</span>${esc(t)} <span class="ptiny">${esc(lg)}</span></li>`).join("")}</ul></section>` : "";
+
+    const feed = liveFeed.length ? liveFeed.map(f => `<li><time>${new Date(f.t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
+        <span class="fw">${nm(f)}${f.what ? ` ${esc(f.what)}` : ""}<span class="sub">${esc(f.lgs.join(", "))}</span></span>
+        <span class="fp ${f.net >= 0 ? "up" : "down"}">${signed(f.net)}</span></li>`).join("")
+      : `<li><span></span><span class="fw lbl">${cnt("in") ? "Scoring changes for your players and your opponents' show up here as they happen." : "Waiting for games. Scoring changes show up here while this page is open."}</span><span></span></li>`;
+
+    el.innerHTML = `<div class="lcol">
+      <div class="lhead"><b>Week ${wk}</b><span>${cnt("in")} live · ${cnt("pre")} upcoming · ${cnt("post")} final</span></div>
+      ${b.length ? `<section class="games" data-sec="Games" aria-label="NFL games">${games}</section>` : ""}
+      ${alertHtml}
+      <section class="card2" data-sec="Just happened"><h2>Just happened</h2><ul class="feed">${feed}</ul></section>
+      <div class="lcards">${xs.map(liveCard).join("")}</div>
+    </div>`;
+  }
+
+  // ===================== Player game log =====================
+  const logCache = new Map();
+  const playerWeeks = (kind, pid, season) => {
+    const k = `${kind}-${pid}-${season}`;
+    if (!logCache.has(k)) logCache.set(k, fetch(`https://api.sleeper.app/${kind}/nfl/player/${encodeURIComponent(pid)}?season_type=regular&season=${season}&grouping=week`).then(r => r.ok ? r.json() : {}).catch(() => ({})));
+    return logCache.get(k);
+  };
+  const snapPct = st => st?.off_snp && st?.tm_off_snp ? st.off_snp / st.tm_off_snp * 100 : null;
+  const ownLeague = pid => {
+    const xs = (last?.data || []).filter(Boolean);
+    return xs.find(x => x.rosters.find(r => r.roster_id === x.myRosterId)?.players?.includes(pid)) || xs.find(x => x.rosters.some(r => r.players?.includes(pid))) || xs[0];
+  };
+
+  async function openPlayer(pid, name, season = last?.season) {
+    const d = $("pl"), x = ownLeague(pid), sc = x?.lg.scoring_settings || {};
+    if (!d.open) d.showModal();
+    d.innerHTML = `<p class="loading">Loading ${esc(name)}…</p>`;
+    const [log, proj] = await Promise.all([playerWeeks("stats", pid, season), playerWeeks("projections", pid, season)]);
+    const rows = Object.keys(log).map(Number).sort((a, b) => b - a).filter(w => log[w]?.stats?.gp).map(w => {
+      const r = log[w], st = r.stats, pr = proj[w]?.stats;
+      return { w, opp: r.opponent || "", pts: scoreStats(st, sc), proj: pr ? scoreStats(pr, sc) : null, snap: snapPct(st), st };
+    });
+    const pos = Object.values(log).find(r => r?.player)?.player?.position || (isNaN(pid) ? "DEF" : "");
+    const avg = f => { const v = rows.map(f).filter(z => z != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    const ppg = avg(r => r.pts), l3 = rows.length ? rows.slice(0, 3).reduce((a, r) => a + r.pts, 0) / Math.min(3, rows.length) : null;
+    const vals = [...rows].reverse().map(r => r.pts), top = Math.max(1, ...vals);
+    const seasons = [+season, +season - 1];
+    d.innerHTML = `<div class="plhead"><div><h3>${esc(name)}</h3><span class="ptiny">${esc(pos)}${x ? ` · scored with ${esc(x.lg.name)}` : ""}</span></div>
+        <button type="button" class="icon" id="plClose" aria-label="Close">&times;</button></div>
+      <div class="seg small" id="plSeason" style="margin-top:8px">${seasons.map(y => `<button type="button" data-y="${y}" aria-pressed="${y === +season}">${y}</button>`).join("")}</div>
+      ${rows.length ? `<div class="plstats">
+        <div><b class="num">${rows.length}</b><span>games</span></div>
+        <div><b class="num">${f1(ppg)}</b><span>pts per game</span></div>
+        <div><b class="num">${f1(l3)}</b><span>last 3</span></div>
+        ${avg(r => r.snap) != null ? `<div><b class="num">${avg(r => r.snap).toFixed(0)}%</b><span>snaps</span></div>` : ""}
+      </div>
+      ${spark(vals.map(v => v / top))}
+      <div class="tablewrap"><table class="log tight"><thead><tr><th>Wk</th><th>Opp</th><th>Line</th><th>Snap</th><th>Proj</th><th>Pts</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td class="num">${r.w}</td><td>${esc(r.opp)}</td><td class="ln2">${esc(statLine(r.st, pos))}</td><td class="num">${r.snap == null ? "—" : r.snap.toFixed(0) + "%"}</td><td class="num">${r.proj == null ? "—" : f1(r.proj)}</td><td class="num ${r.proj != null ? (r.pts >= r.proj ? "up" : "down") : ""}"><b>${f1(r.pts)}</b></td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="lede" style="margin-top:10px">No games logged for ${esc(season)}.</p>`}`;
+    $("plClose").onclick = () => d.close();
+    $("plSeason").onclick = e => { const b = e.target.closest("[data-y]"); if (b) openPlayer(pid, name, +b.dataset.y); };
+  }
+
+  // ===================== Players, Trends, Best games =====================
+  const pv = { lg: null, pos: "ALL", grp: "all", q: "", key: "ppg", dir: -1, best: "single" };
+  const wkRows = new Map();    // "season-week" -> Promise<rows>
+  const pvCache = new Map();   // "league-season-lastWeek" -> Promise<Map(pid -> player season)>
+  const PTABS = ["players", "trends", "best"];
+  const POS = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"];
+
+  function statWeek(season, w) {
+    const k = `${season}-${w}`;
+    if (!wkRows.has(k)) {
+      const pos = ["QB", "RB", "WR", "TE", "K", "DEF"].map(q => "position%5B%5D=" + q).join("&");
+      wkRows.set(k, fetch(`https://api.sleeper.app/stats/nfl/${season}/${w}?season_type=regular&${pos}`).then(r => r.ok ? r.json() : []).catch(() => []));
+    }
+    return wkRows.get(k);
+  }
+
+  // Every player's season in one league's scoring: one entry per game played.
+  function leagueSeason(x, season) {
+    const lastW = x.lastScored || Math.min(18, state.week || 18);
+    const k = `${x.lg.league_id}-${season}-${lastW}`;
+    if (!pvCache.has(k)) pvCache.set(k, (async () => {
+      const weeks = [];
+      for (let w = x.settings.start_week || 1; w <= lastW; w++) weeks.push(w);
+      const all = await Promise.all(weeks.map(w => statWeek(season, w).then(r => [w, r])));
+      const sc = x.lg.scoring_settings || {}, out = new Map();
+      for (const [w, rows] of all) for (const r of rows) {
+        const st = r.stats || {};
+        if (!st.gp) continue;
+        let q = out.get(r.player_id);
+        if (!q) { q = { pid: r.player_id, name: playerName(r, r.player_id), pos: r.player?.position || "", team: r.team || r.player?.team || "", games: [] }; out.set(r.player_id, q); }
+        q.team = r.team || q.team;
+        q.games.push({ w, opp: r.opponent || "", pts: scoreStats(st, sc), snap: snapPct(st), tgt: st.rec_tgt || 0, touch: (st.rush_att || 0) + (st.rec || 0), st });
+      }
+      for (const q of out.values()) {
+        const g = q.games, sum = f => g.reduce((a, z) => a + (f(z) || 0), 0), n = g.length;
+        const snaps = g.map(z => z.snap).filter(z => z != null);
+        q.gp = n; q.tot = sum(z => z.pts); q.ppg = q.tot / n;
+        q.l3 = g.slice(-3).reduce((a, z) => a + z.pts, 0) / Math.min(3, n);
+        q.snap = snaps.length ? snaps.reduce((a, b) => a + b, 0) / snaps.length : null;
+        q.tgt = sum(z => z.tgt) / n; q.touch = sum(z => z.touch) / n;
+      }
+      return out;
+    })());
+    return pvCache.get(k);
+  }
+
+  const pvLeague = () => {
+    const xs = (last?.visible || []).concat((last?.data || []).filter(Boolean));
+    return xs.find(x => x.lg.league_id === pv.lg) || xs[0] || null;
+  };
+  const GROUPS = [["all", "Everyone"], ["mine", "My team"], ["opp", "This week's opponent"], ["fa", "Free agents"], ["rostered", "Rostered"]];
+
+  function inGroup(x) {
+    const r = x.rosters, mine = r.find(z => z.roster_id === x.myRosterId);
+    const oppRid = x.liveWeek?.outlook?.teams && x.liveWeek.outlook.iOpp >= 0 ? x.liveWeek.outlook.teams[x.liveWeek.outlook.iOpp].rid : null;
+    const set = rs => new Set(rs.flatMap(z => z.players || []));
+    const owned = set(r), g = pv.grp;
+    if (g === "mine") { const s = set(mine ? [mine] : []); return q => s.has(q.pid); }
+    if (g === "opp") { const s = set(r.filter(z => z.roster_id === oppRid)); return q => s.has(q.pid); }
+    if (g === "fa") return q => !owned.has(q.pid);
+    if (g === "rostered") return q => owned.has(q.pid);
+    return () => true;
+  }
+
+  function pvFilter(x, map) {
+    const grp = inGroup(x), q = pv.q.trim().toLowerCase();
+    return [...map.values()].filter(p => (pv.pos === "ALL" || p.pos === pv.pos) && grp(p) && (!q || `${p.name} ${p.team}`.toLowerCase().includes(q)));
+  }
+  const pvCell = (p, extra = "") => `<td class="pcell">${nm(p)}<span class="lbl">${esc(p.pos)}${p.team && p.pos !== "DEF" ? " · " + esc(p.team) : ""}${extra}</span></td>`;
+  const pctTxt0 = v => v == null ? "—" : v.toFixed(0) + "%";
+
+  function paintPlayers(x, map) {
+    const rows = pvFilter(x, map), k = pv.key, d = pv.dir;
+    rows.sort((a, b) => k === "name" ? d * a.name.localeCompare(b.name) : d * ((a[k] ?? -1) - (b[k] ?? -1)));
+    const th = (key, label, cls = "") => `<th class="${cls}"><button type="button" data-k="${key}" aria-sort="${k === key ? (d < 0 ? "descending" : "ascending") : "none"}">${label}</button></th>`;
+    return `<section class="card2" data-sec="Leaderboard"><div class="tablewrap"><table class="tight">
+      <thead><tr>${th("name", "Player")}${th("gp", "G")}${th("tot", "Pts", "opt")}${th("ppg", "PPG")}${th("l3", "L3")}${th("snap", "Snap")}${th("tgt", "Tgt", "opt")}${th("touch", "Tch", "opt")}</tr></thead>
+      <tbody>${rows.slice(0, 150).map(p => `<tr>${pvCell(p)}<td class="num">${p.gp}</td><td class="num opt">${f1(p.tot)}</td><td class="num"><b>${f1(p.ppg)}</b></td>
+        <td class="num ${p.l3 > p.ppg + 2 ? "up" : p.l3 < p.ppg - 2 ? "down" : ""}">${f1(p.l3)}</td><td class="num">${pctTxt0(p.snap)}</td><td class="num opt">${f1(p.tgt)}</td><td class="num opt">${f1(p.touch)}</td></tr>`).join("") || `<tr><td class="lbl" colspan="8">No players match.</td></tr>`}</tbody>
+    </table></div>${rows.length > 150 ? `<p class="ptiny">Showing the top 150 of ${rows.length}. Narrow it with the filters.</p>` : ""}
+    <p class="note">L3 = last 3 games played. Snap = share of his team's offensive snaps. Tgt and Tch = targets and touches per game.</p></section>`;
+  }
+
+  function paintTrends(x, map) {
+    const list = pvFilter(x, map).filter(p => p.gp >= 5).map(p => {
+      const rec = p.games.slice(-3), old = p.games.slice(0, -3), avg = (g, f) => { const v = g.map(f).filter(z => z != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+      const was = avg(old, z => z.pts), now = avg(rec, z => z.pts), sw = avg(old, z => z.snap), sn = avg(rec, z => z.snap);
+      const ow = avg(old, z => z.tgt + z.touch - (z.st.rec || 0)), on = avg(rec, z => z.tgt + z.touch - (z.st.rec || 0));
+      return { ...p, was, now, diff: now - was, sw, sn, snapD: sn != null && sw != null ? sn - sw : null, ow, on, oppD: on - ow };
+    }).filter(p => p.was >= 3 || p.now >= 3);
+    const row = p => `<tr>${pvCell(p)}<td class="num">${f1(p.was)} → <b>${f1(p.now)}</b></td><td class="num ${p.diff >= 0 ? "up" : "down"}">${signed(p.diff)}</td><td class="num opt">${p.snapD == null ? "—" : (p.snapD >= 0 ? "+" : "−") + Math.abs(p.snapD).toFixed(0) + "%"}</td></tr>`;
+    const table = (title, sec, rows) => `<section class="card2" data-sec="${sec}"><h2>${title}</h2><div class="tablewrap"><table class="tight"><thead><tr><th>Player</th><th>PPG</th><th>Change</th><th class="opt">Snaps</th></tr></thead><tbody>${rows.map(row).join("") || `<tr><td class="lbl" colspan="4">Nobody here.</td></tr>`}</tbody></table></div></section>`;
+    const owned = new Set(x.rosters.flatMap(r => r.players || []));
+    const breakouts = list.filter(p => ["RB", "WR", "TE"].includes(p.pos) && p.now < 18 && (p.snapD >= 10 || p.oppD >= 3) && p.on >= 4).sort((a, b) => (b.oppD + (b.snapD || 0) / 5) - (a.oppD + (a.snapD || 0) / 5)).slice(0, 12);
+    return `<p class="lede">Last 3 games played against everything before them, in ${esc(x.lg.name)} scoring.</p>
+      <section class="card2" data-sec="Breakouts"><h2>Breakout watch</h2><p class="ptiny">Role is growing: snap share up 10%+ or 3+ more targets and carries per game, before the points have fully caught up.</p>
+      <div class="tablewrap"><table class="tight"><thead><tr><th>Player</th><th>Tgt + car</th><th>Snaps</th><th>PPG</th></tr></thead><tbody>${breakouts.map(p => `<tr>${pvCell(p, owned.has(p.pid) ? "" : " · free agent")}<td class="num">${f1(p.ow)} → <b>${f1(p.on)}</b></td><td class="num">${pctTxt0(p.sw)} → ${pctTxt0(p.sn)}</td><td class="num">${f1(p.now)}</td></tr>`).join("") || `<tr><td class="lbl" colspan="4">Nobody fits right now.</td></tr>`}</tbody></table></div></section>
+      <div class="twocol">${table("Rising", "Rising", [...list].sort((a, b) => b.diff - a.diff).slice(0, 15))}${table("Falling", "Falling", [...list].sort((a, b) => a.diff - b.diff).slice(0, 15))}</div>`;
+  }
+
+  const CATS = [["pass_yd", "Passing yards"], ["pass_td", "Passing TDs"], ["rush_yd", "Rushing yards"], ["rec_yd", "Receiving yards"], ["rec", "Receptions"], ["rec_tgt", "Targets"]];
+  function paintBest(x, map) {
+    const list = pvFilter(x, map);
+    const games = list.flatMap(p => p.games.map(g => ({ p, g }))).sort((a, b) => b.g.pts - a.g.pts).slice(0, 20);
+    const leaders = CATS.map(([k, label]) => {
+      const rows = pv.best === "single"
+        ? list.flatMap(p => p.games.map(g => ({ p, v: g.st[k] || 0, sub: `Wk ${g.w}${g.opp ? " vs " + g.opp : ""}` })))
+        : (() => { const maxG = Math.max(1, ...list.map(p => p.gp)); return list.filter(p => p.gp >= maxG / 2).map(p => ({ p, v: p.games.reduce((a, g) => a + (g.st[k] || 0), 0) / p.gp, sub: `${p.gp} games` })); })();
+      rows.sort((a, b) => b.v - a.v);
+      return `<div class="card2"><h2>${label}</h2><ul class="moves">${rows.slice(0, 5).filter(r => r.v > 0).map(r => `<li><span class="what">${nm(r.p)}<span class="sub">${esc(r.sub)}</span></span><span class="gain num">${pv.best === "single" ? r.v : r.v.toFixed(1)}</span></li>`).join("") || `<li><span class="none">Nobody yet.</span></li>`}</ul></div>`;
+    }).join("");
+    return `<section class="card2" data-sec="Top games"><h2>Top 20 games</h2><div class="tablewrap"><table class="tight"><thead><tr><th>Player</th><th>Wk</th><th>Line</th><th>Pts</th></tr></thead><tbody>
+      ${games.map(({ p, g }) => `<tr>${pvCell(p)}<td class="num">${g.w}${g.opp ? ` <span class="ptiny">${esc(g.opp)}</span>` : ""}</td><td class="ln2" style="text-align:left;white-space:normal">${esc(statLine(g.st, p.pos))}</td><td class="num"><b>${f1(g.pts)}</b></td></tr>`).join("") || `<tr><td class="lbl" colspan="4">No games yet.</td></tr>`}
+      </tbody></table></div></section>
+      <section data-sec="Leaders"><div class="seg small" id="bestMode" style="margin-bottom:10px">
+        <button type="button" data-best="single" aria-pressed="${pv.best === "single"}">Single game</button><button type="button" data-best="avg" aria-pressed="${pv.best === "avg"}">Per game</button></div>
+      <div class="twocol">${leaders}</div></section>`;
+  }
+
+  let pvMap = null;
+  const paintFor = t => (t === "players" ? paintPlayers : t === "trends" ? paintTrends : paintBest);
+  function repaintPlayers() {
+    const t = tab, x = pvLeague(), box = $(t + "Body")?.querySelector(".pvRows");
+    if (box && x && pvMap) box.innerHTML = paintFor(t)(x, pvMap);
+    buildSubnav();
+  }
+
+  async function renderPlayerTabs() {
+    if (!PTABS.includes(tab) || !last) return;
+    const body = $(tab + "Body"), t = tab, leagues = (last.data || []).filter(Boolean);
+    if (!leagues.length) { body.innerHTML = ""; return; }
+    const x = pvLeague();
+    pv.lg = x.lg.league_id;
+    body.innerHTML = `<div class="lcol"><div class="pvbar">
+        <select id="pvLg-${t}" data-pv="lg" aria-label="League scoring">${leagues.map(l => `<option value="${esc(l.lg.league_id)}" ${l.lg.league_id === pv.lg ? "selected" : ""}>${esc(l.lg.name)}</option>`).join("")}</select>
+        <select id="pvGrp-${t}" data-pv="grp" aria-label="Whose players">${GROUPS.map(([k, l]) => `<option value="${k}" ${k === pv.grp ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <div class="seg small" role="group" aria-label="Position">${POS.map(q => `<button type="button" data-pos="${q}" aria-pressed="${q === pv.pos}">${q}</button>`).join("")}</div>
+        <input type="search" id="pvQ-${t}" data-pv="q" placeholder="Search" value="${esc(pv.q)}" autocomplete="off" aria-label="Search players">
+      </div><div class="pvRows lcol"><p class="loading">Adding up the season, week by week…</p></div></div>`;
+    pvMap = await leagueSeason(x, last.season);
+    if (tab === t) repaintPlayers();
+  }
+
+  function wirePlayerTabs() {
+    for (const t of PTABS) {
+      const b = $(t + "Body");
+      b.addEventListener("change", e => {
+        const f = e.target.dataset.pv;
+        if (f === "lg") { pv.lg = e.target.value; renderPlayerTabs(); }
+        else if (f === "grp") { pv.grp = e.target.value; repaintPlayers(); }
+      });
+      b.addEventListener("input", e => { if (e.target.dataset.pv === "q") { pv.q = e.target.value; repaintPlayers(); } });
+      b.addEventListener("click", e => {
+        const pos = e.target.closest("[data-pos]"), sort = e.target.closest("[data-k]"), best = e.target.closest("[data-best]");
+        if (pos) {
+          pv.pos = pos.dataset.pos;
+          pos.parentElement.querySelectorAll("button").forEach(z => z.setAttribute("aria-pressed", z === pos));
+          repaintPlayers();
+        } else if (sort) {
+          const k = sort.dataset.k;
+          if (pv.key === k) pv.dir *= -1; else { pv.key = k; pv.dir = k === "name" ? 1 : -1; }
+          repaintPlayers();
+        } else if (best) { pv.best = best.dataset.best; repaintPlayers(); }
+      });
+    }
   }
 
   function setStatus(msg, isErr) {
@@ -1475,8 +2018,10 @@ footer a { color: inherit; }
     if (loading) return;
     loading = true;
     $("go").disabled = true;
-    if (!quiet) { setStatus(`Loading ${username}…`); seasonCache = null; }
+    if (!quiet) { setStatus(`Loading ${username}…`); seasonCache = null; doneWeeks.clear(); }
+    quietRender = !!quiet;
     try {
+      try { state = await get("/state/nfl"); } catch {}
       const user = await get(`/user/${encodeURIComponent(username)}`);
       if (!user || !user.user_id) throw new Error(`No Sleeper account named "${username}". Check the spelling (it's the username, not the team name).`);
       const leagues = await get(`/user/${user.user_id}/leagues/nfl/${season}`) || [];
@@ -1486,13 +2031,16 @@ footer a { color: inherit; }
       }
       const data = await Promise.all(leagues.map(l => loadLeague(l, user.user_id, season, ctx).catch(e => { console.error(l.name, e); return null; })));
       weekSim = simulateWeek(data, ctx);
+      liveCtx = ctx;
+      trackLive(user, season, data);
       render(user, season, data);
       store.set("ml.user", username);
       const anyLive = data.some(x => x?.liveWeek?.live);
       $("autoWrap").hidden = !anyLive;
       $("refresh").hidden = false;
-      setStatus(`Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${anyLive ? " · live week, scores refresh every 2 minutes" : ""}`);
-      schedule(anyLive, username, season);
+      const inGame = (ctx?.board || []).some(g => g.state === "in");
+      setStatus(`${user.display_name} · updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${inGame ? " · live" : ""}`);
+      schedule(anyLive, inGame, username, season);
       try {
         const u = new URL(location.href);
         if (u.protocol.startsWith("http")) { u.searchParams.set("user", username); history.replaceState(null, "", u); }
@@ -1501,15 +2049,17 @@ footer a { color: inherit; }
       setStatus(e.message || "Couldn't reach Sleeper. Check your connection and try again.", true);
     } finally {
       loading = false;
+      quietRender = false;
       $("go").disabled = false;
     }
   }
 
-  function schedule(live, username, season) {
+  // Every minute with games on; every five otherwise, so an open page catches the next kickoff.
+  function schedule(live, inGame, username, season) {
     clearInterval(timer);
     if (live) timer = setInterval(() => {
       if ($("auto").checked && document.visibilityState === "visible") load(username, season, true);
-    }, 120000);
+    }, inGame ? 60000 : 300000);
   }
 
   async function init() {
@@ -1539,10 +2089,33 @@ footer a { color: inherit; }
       setTag(last.user.user_id, b.dataset.league, b.dataset.tag);
       rerender();
     });
-    $("tabs").addEventListener("click", e => {
-      const b = e.target.closest("[data-tab]"); if (!b) return;
-      tab = b.dataset.tab; store.set("ml.tab", tab); showTab();
+    const pick = e => {
+      const b = e.target.closest("[data-tab]");
+      if (b) { tab = b.dataset.tab; store.set("ml.tab", tab); toggleDrawer(false); showTab(); window.scrollTo(0, 0); return; }
+      const pin = e.target.closest("[data-pin]");
+      if (pin) {
+        const k = pin.dataset.pin;
+        hot = hot.includes(k) ? hot.filter(x => x !== k) : TABS.filter(x => hot.includes(x) || x === k);
+        store.set("ml.hotbar", JSON.stringify(hot));
+        renderNav();
+      }
+    };
+    $("tabs").addEventListener("click", pick);
+    $("drawer").addEventListener("click", pick);
+    $("burger").addEventListener("click", () => toggleDrawer(true));
+    $("scrim").addEventListener("click", () => toggleDrawer(false));
+    $("subnav").addEventListener("click", e => {
+      const b = e.target.closest("[data-i]");
+      if (b) $("subnav")._secs[+b.dataset.i]?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+    document.addEventListener("click", e => {
+      const n = e.target.closest(".pname");
+      if (n?.dataset.pid) openPlayer(n.dataset.pid, n.textContent);
+    });
+    let navTimer = null;
+    new MutationObserver(() => { clearTimeout(navTimer); navTimer = setTimeout(buildSubnav, 200); }).observe($("wrap"), { childList: true, subtree: true });
+    wirePlayerTabs();
+    showTab();
     $("pq").addEventListener("input", e => { pState.q = e.target.value; renderPlayers(); });
     $("pf").addEventListener("click", e => {
       const b = e.target.closest("[data-pf]"); if (!b) return;
