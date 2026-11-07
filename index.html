@@ -208,6 +208,13 @@ button:disabled { opacity: .55; cursor: progress; }
 .swing .lbl { color: var(--muted); }
 table.rank td:nth-child(2), table.rank th:nth-child(2), table.roster td:first-child { text-align: left; max-width: 13rem; overflow: hidden; text-overflow: ellipsis; }
 table.rank tr.me td { font-weight: 600; background: var(--surface-2); }
+tr.cutline td { border-top: 2px solid var(--accent); }
+.idpRows table th:nth-child(2) { text-align: left; }
+tr.cutnote td { color: var(--accent); font-size: .72rem; text-align: left; padding: 6px 6px 2px; border: 0; }
+tr.mine td { background: rgba(255, 122, 26, .08); }
+.kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px 14px; font-size: .84rem; }
+.kv div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding: 3px 0; }
+.kv b { font-variant-numeric: tabular-nums; }
 table.roster tfoot td { font-weight: 600; }
 table.roster tfoot tr:first-child td { border-top: 1px solid var(--line); }
 table.roster tfoot td:first-child { max-width: none; white-space: normal; }
@@ -446,6 +453,7 @@ footer a { color: inherit; }
   <div class="panel" id="panel-players" role="tabpanel" hidden><div id="playersBody"></div></div>
   <div class="panel" id="panel-trends" role="tabpanel" hidden><div id="trendsBody"></div></div>
   <div class="panel" id="panel-best" role="tabpanel" hidden><div id="bestBody"></div></div>
+  <div class="panel" id="panel-idp" role="tabpanel" hidden><div id="idpBody"></div></div>
 
   <div class="panel" id="panel-season" role="tabpanel" hidden>
     <div id="seasonBody"></div>
@@ -1175,7 +1183,7 @@ footer a { color: inherit; }
   };
   const NAV = [
     ["This week", [["live", "Live"], ["week", "Matchups"]]],
-    ["Players", [["players", "Players"], ["trends", "Trends"], ["best", "Best games"]]],
+    ["Players", [["players", "Players"], ["trends", "Trends"], ["best", "Best games"], ["idp", "IDP rankings"]]],
     ["Moves", [["moves", "Adds & trades"]]],
     ["Season", [["season", "Season"]]],
     ["Settings", [["settings", "Settings"]]]
@@ -1697,7 +1705,7 @@ footer a { color: inherit; }
     for (const t of TABS) $("panel-" + t).hidden = t !== cur;
     renderNav();
     if (cur === "live") renderLive();
-    if (!quietRender) { renderSeasonTabs(); renderPlayerTabs(); }
+    if (!quietRender) { renderSeasonTabs(); renderPlayerTabs(); renderIdp(); }
     buildSubnav();
   }
 
@@ -2079,6 +2087,194 @@ footer a { color: inherit; }
     }
   }
 
+  // ===================== IDP rankings =====================
+  // Value per game = his league-scored production with big plays pulled toward the position's
+  // average (tackles repeat week to week, sacks and picks swing), blended with Sleeper's
+  // rest-of-season projection. Everything uses that league's own scoring settings.
+  const IDP_SLOTS = new Set(["DL", "LB", "DB", "IDP_FLEX"]);
+  const IDP_POS = ["DL", "LB", "DB"];
+  const TACKLE_KEYS = ["idp_tkl", "idp_tkl_solo", "idp_tkl_ast"];
+  const BIG_K = 6;     // games of league-average big plays mixed into each player's own rate
+  const PROJ_K = 4;    // games' worth of weight on the projection
+  const isIdpLeague = x => (x.lg.roster_positions || []).some(q => IDP_SLOTS.has(q));
+  const ID = { lg: null, pos: "ALL", grp: "all", q: "", key: "value", dir: -1 };
+  const idpCache = new Map();
+
+  function idpWeek(season, w) {
+    const k = `idp-${season}-${w}`;
+    if (!wkRows.has(k)) wkRows.set(k, fetch(`https://api.sleeper.app/stats/nfl/${season}/${w}?season_type=regular&${IDP_POS.map(q => "position%5B%5D=" + q).join("&")}`)
+      .then(r => r.ok ? r.json() : []).catch(() => []));
+    return wkRows.get(k);
+  }
+
+  function idpBoard(x, season) {
+    const current = String(season) === String(state.league_season) && state.season_type === "regular";
+    const lastW = x.lastScored || 18;
+    const key = `${x.lg.league_id}-${season}-${lastW}`;
+    if (idpCache.has(key)) return idpCache.get(key);
+    const promise = (async () => {
+      const sc = x.lg.scoring_settings || {};
+      const tackleSc = Object.fromEntries(TACKLE_KEYS.map(k => [k, sc[k] || 0]));
+      const played = [], ahead = [];
+      for (let w = x.settings.start_week || 1; w <= lastW; w++) played.push(w);
+      if (current) for (let w = state.week + 1; w <= LAST_WEEK; w++) ahead.push(w);
+      const [stats, projs] = await Promise.all([
+        Promise.all(played.map(w => idpWeek(season, w))),
+        Promise.all(ahead.map(w => weekProjections(season, w, IDP_POS)))
+      ]);
+      const owner = new Map();
+      for (const r of x.rosters) for (const id of [...(r.players || []), ...(r.reserve || []), ...(r.taxi || [])]) owner.set(id, r.roster_id);
+      const ppl = new Map();
+      const get1 = (id, row) => {
+        let q = ppl.get(id);
+        if (!q) {
+          const pl = row?.player || {};
+          q = { pid: id, name: playerName(row, id), pos: (pl.fantasy_positions || []).find(z => IDP_POS.includes(z)) || pl.position || "", spot: pl.position || "", team: row?.team || pl.team || "",
+                inj: pl.injury_status || null, gp: 0, tot: 0, tkl: 0, big: 0, snaps: [], games: [], ros: 0, rosG: 0, rid: owner.get(id) ?? null };
+          ppl.set(id, q);
+        }
+        if (row?.team) q.team = row.team;
+        return q;
+      };
+      stats.forEach((rows, i) => {
+        for (const r of rows) {
+          const st = r.stats || {};
+          if (!st.gp && !st.def_snp) continue;
+          const q = get1(r.player_id, r), pts = scoreStats(st, sc), tk = scoreStats(st, tackleSc);
+          q.gp++; q.tot += pts; q.tkl += tk; q.big += pts - tk;
+          if (st.def_snp && st.tm_def_snp) q.snaps.push(st.def_snp / st.tm_def_snp * 100);
+          q.games.push({ w: played[i], pts, st, opp: r.opponent || "" });
+        }
+      });
+      for (const m of projs) for (const [id, r] of m) {
+        const pts = Math.max(0, scoreStats(r.stats || {}, sc));
+        if (pts <= 0) continue;
+        const q = get1(id, r);
+        q.ros += pts; q.rosG++;
+      }
+      // League-average big-play points per game by position, among real starters.
+      const avgBig = {};
+      for (const pos of IDP_POS) {
+        const reg = [...ppl.values()].filter(q => q.pos === pos && q.gp >= 3 && q.snaps.length && q.snaps.reduce((a, b) => a + b, 0) / q.snaps.length >= 60);
+        const g = reg.reduce((a, q) => a + q.gp, 0);
+        avgBig[pos] = g ? reg.reduce((a, q) => a + q.big, 0) / g : 0;
+      }
+      const list = [...ppl.values()].filter(q => IDP_POS.includes(q.pos) && (q.gp || q.ros)).map(q => {
+        q.ppg = q.gp ? q.tot / q.gp : null;
+        q.tklG = q.gp ? q.tkl / q.gp : null;
+        q.bigG = q.gp ? q.big / q.gp : null;
+        q.snap = q.snaps.length ? q.snaps.reduce((a, b) => a + b, 0) / q.snaps.length : null;
+        q.projG = q.rosG ? q.ros / q.rosG : null;
+        q.left = ahead.length ? q.rosG : null;   // weeks Sleeper projects him to play
+        q.l3 = q.games.length ? q.games.slice(-3).reduce((a, z) => a + z.pts, 0) / Math.min(3, q.games.length) : null;
+        q.reg = q.gp ? q.tklG + (q.big + (avgBig[q.pos] || 0) * BIG_K) / (q.gp + BIG_K) : null;
+        q.value = q.reg != null && q.projG != null ? (q.reg * q.gp + q.projG * PROJ_K) / (q.gp + PROJ_K) : (q.projG ?? q.reg ?? 0);
+        q.luck = q.gp ? q.bigG - (avgBig[q.pos] || 0) : null;
+        return q;
+      }).sort((a, b) => b.value - a.value);
+      // Startable line: every team's IDP slots filled with the best available.
+      const slots = (x.lg.roster_positions || []).filter(z => IDP_SLOTS.has(z));
+      const nStart = slots.length * x.rosters.length;
+      const cut = list[nStart]?.value ?? 0;
+      list.forEach((q, i) => { q.rank = i + 1; q.over = q.value - cut; });
+      return { list, nStart, slots, avgBig, sc, current, ahead: ahead.length };
+    })();
+    idpCache.set(key, promise);
+    promise.catch(() => idpCache.delete(key));
+    return promise;
+  }
+
+  function idpScoringCard(sc) {
+    const solo = sc.idp_tkl_solo || sc.idp_tkl || 0;
+    const items = [["Solo tackle", ["idp_tkl_solo"]], ["Assist", ["idp_tkl_ast"]], ["Tackle (any)", ["idp_tkl"]], ["Tackle for loss", ["idp_tkl_loss"]], ["Sack", ["idp_sack"]], ["QB hit", ["idp_qb_hit"]],
+      ["Pass defended", ["idp_pass_def"]], ["Interception", ["idp_int"]], ["Forced fumble", ["idp_ff"]], ["Fumble recovery", ["idp_fum_rec"]], ["Defensive TD", ["idp_def_td"]], ["Safety", ["idp_safe"]], ["Blocked kick", ["idp_blk_kick"]]]
+      .map(([l, ks]) => [l, ks.reduce((a, k) => a + (sc[k] || 0), 0)]).filter(([, v]) => v);
+    const eq = ([l, v]) => solo && l !== "Solo tackle" && v >= solo * 1.5 ? ` <span class="ptiny">= ${(v / solo).toFixed(1)} solo</span>` : "";
+    return `<div class="kv">${items.map(it => `<div><span>${it[0]}${eq(it)}</span><b>${it[1]}</b></div>`).join("")}</div>`;
+  }
+
+  async function renderIdp() {
+    if (tab !== "idp" || !last) return;
+    const body = $("idpBody");
+    const leagues = (last.data || []).filter(Boolean).filter(isIdpLeague);
+    if (!leagues.length) {
+      body.innerHTML = `<div class="card2"><h2>No IDP leagues here</h2><p class="lede">None of ${esc(last.user.display_name)}'s leagues start defensive players. To rank IDP for someone else's league, load their Sleeper username in Settings.</p></div>`;
+      return;
+    }
+    const x = leagues.find(l => l.lg.league_id === ID.lg) || leagues[0];
+    ID.lg = x.lg.league_id;
+    body.innerHTML = `<div class="lcol"><div class="pvbar">
+        ${leagues.length > 1 ? `<select data-id="lg" aria-label="League">${leagues.map(l => `<option value="${esc(l.lg.league_id)}" ${l === x ? "selected" : ""}>${esc(l.lg.name)}</option>`).join("")}</select>` : `<b>${esc(x.lg.name)}</b>`}
+        <select data-id="grp" aria-label="Whose players">${[["all", "Everyone"], ["fa", "Free agents"], ["mine", "My team"], ["rostered", "Rostered"]].map(([k, l]) => `<option value="${k}" ${k === ID.grp ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <div class="seg small" role="group" aria-label="Position">${["ALL", ...IDP_POS].map(q => `<button type="button" data-idpos="${q}" aria-pressed="${q === ID.pos}">${q}</button>`).join("")}</div>
+        <input type="search" data-id="q" placeholder="Search" value="${esc(ID.q)}" autocomplete="off" aria-label="Search players">
+      </div><div class="idpRows lcol"><p class="loading">Scoring every defender with this league's settings…</p></div></div>`;
+    const board = await idpBoard(x, last.season);
+    if (tab === "idp" && ID.lg === x.lg.league_id) paintIdp(x, board);
+  }
+
+  function paintIdp(x, b) {
+    const box = $("idpBody").querySelector(".idpRows");
+    if (!box) return;
+    const q = ID.q.trim().toLowerCase(), k = ID.key, d = ID.dir;
+    const inGrp = p => ID.grp === "all" || (ID.grp === "fa" ? p.rid == null : ID.grp === "mine" ? p.rid === x.myRosterId : p.rid != null);
+    const rows = b.list.filter(p => (ID.pos === "ALL" || p.pos === ID.pos) && inGrp(p) && (!q || `${p.name} ${p.team}`.toLowerCase().includes(q)));
+    if (k !== "rank") rows.sort((p1, p2) => k === "name" ? d * p1.name.localeCompare(p2.name) : d * ((p1[k] ?? -99) - (p2[k] ?? -99)));
+    else if (d > 0) rows.reverse();
+    const who = p => p.rid == null ? "free agent" : p.rid === x.myRosterId ? "your team" : x.nameOf(p.rid);
+    const th = (key, label, cls = "") => `<th class="${cls}"><button type="button" data-ik="${key}" aria-sort="${k === key ? (d < 0 ? "descending" : "ascending") : "none"}">${label}</button></th>`;
+    const showCut = k === "value" && d < 0 && ID.pos === "ALL" && ID.grp === "all" && !q;
+    let body = "";
+    rows.slice(0, 200).forEach((p, i) => {
+      if (showCut && i === b.nStart) body += `<tr class="cutnote"><td colspan="9">Startable line: ${b.nStart} IDP starters league-wide (${x.rosters.length} teams × ${b.slots.length} slot${b.slots.length > 1 ? "s" : ""})</td></tr>`;
+      body += `<tr class="${showCut && i === b.nStart ? "cutline" : ""} ${p.rid === x.myRosterId ? "mine" : ""}">
+        <td class="num">${p.rank}</td>
+        <td class="pcell">${nm(p)}<span class="lbl">${esc(p.spot || p.pos)}${p.team ? " · " + esc(p.team) : ""} · ${esc(who(p))}${p.inj ? " · " + esc(p.inj) : ""}${p.inj && b.ahead && p.left < b.ahead - 1 ? ` · projected for ${p.left} of ${b.ahead} weeks` : ""}</span></td>
+        <td class="num"><b>${f1(p.value)}</b></td>
+        <td class="num opt">${p.projG == null ? "—" : f1(p.projG)}</td>
+        <td class="num">${p.ppg == null ? "—" : f1(p.ppg)}</td>
+        <td class="num opt">${p.tklG == null ? "—" : f1(p.tklG)}</td>
+        <td class="num opt ${p.luck > 1.5 ? "down" : p.luck < -1.5 ? "up" : ""}" title="${p.luck == null ? "" : `${signed(p.luck)} vs a typical ${p.pos} starter`}">${p.bigG == null ? "—" : f1(p.bigG)}</td>
+        <td class="num">${p.snap == null ? "—" : p.snap.toFixed(0) + "%"}</td>
+        <td class="num opt">${signed(p.over)}</td></tr>`;
+    });
+    const top = b.list.slice(0, b.nStart), mix = IDP_POS.map(z => `${top.filter(p => p.pos === z).length} ${z}`).join(" · ");
+    const fas = b.list.filter(p => p.rid == null && !SEVERE.has(p.inj)).slice(0, 6);
+    const mine = b.list.filter(p => p.rid === x.myRosterId);
+    box.innerHTML = `<section class="card2" data-sec="Scoring"><h2>How this league scores defense</h2>${idpScoringCard(b.sc)}
+        <p class="ptiny">Top ${b.nStart} by value: ${mix}. Big plays average ${IDP_POS.map(z => `${f1(b.avgBig[z])} for ${z}`).join(", ")} per game for regular starters.</p></section>
+      <div class="twocol">
+        <section class="card2" data-sec="Best free agents"><h2>Best free agents</h2><ul class="moves">${fas.map(p => `<li><span class="what">${nm(p)} <span class="ptiny">${esc(p.spot || p.pos)} · ${esc(p.team)}${p.inj ? " · " + esc(p.inj) : ""}</span>
+          <span class="sub">#${p.rank} overall · ${p.ppg == null ? "no games yet" : f1(p.ppg) + " pts/g so far"}${p.snap != null ? ` · ${p.snap.toFixed(0)}% snaps` : ""}</span></span><span class="gain num">${f1(p.value)}<small>value/g</small></span></li>`).join("") || `<li><span class="none">Nobody.</span></li>`}</ul></section>
+        <section class="card2" data-sec="Your defenders"><h2>Your defenders</h2><ul class="moves">${mine.map(p => `<li><span class="what">${nm(p)} <span class="ptiny">${esc(p.spot || p.pos)} · ${esc(p.team)}${p.inj ? " · " + esc(p.inj) : ""}</span>
+          <span class="sub">#${p.rank} overall${p.rank <= b.nStart ? " · startable" : " · below the startable line"}${p.inj && b.ahead && p.left < b.ahead - 1 ? ` · projected for ${p.left} of ${b.ahead} weeks` : ""}${p.luck > 1.5 ? " · big plays running hot" : p.luck < -1.5 ? " · big plays running cold" : ""}</span></span><span class="gain num">${f1(p.value)}<small>value/g</small></span></li>`).join("") || `<li><span class="none">No defenders on your roster.</span></li>`}</ul></section>
+      </div>
+      <section class="card2" data-sec="Rankings"><h2>Rankings</h2><div class="tablewrap"><table class="tight">
+        <thead><tr>${th("rank", "#")}${th("name", "Player")}${th("value", "Value")}${th("projG", "Proj", "opt")}${th("ppg", "PPG")}${th("tklG", "Tkl", "opt")}${th("bigG", "Big", "opt")}${th("snap", "Snap")}${th("over", "+Repl", "opt")}</tr></thead>
+        <tbody>${body || `<tr><td class="lbl" colspan="9">No players match.</td></tr>`}</tbody></table></div>
+        <p class="note">Value = points per game this league can expect going forward: his tackle points as they are, his big-play points (sacks, picks, pass breakups, fumbles, TDs) pulled toward what a typical starter at his position gets, then blended with Sleeper's rest-of-season projection${b.current ? "" : " (no projections for past seasons)"}. Tkl and Big split his actual points per game; a red Big means he's been luckier than a typical starter, so expect fewer. +Repl is value over the first player below the startable line. Value is per game he plays; injured players say how many of the remaining weeks Sleeper projects them for, and Out/IR players are left off Best free agents.</p></section>`;
+    buildSubnav();
+  }
+
+  function wireIdp() {
+    const b = $("idpBody");
+    b.addEventListener("change", e => {
+      const f = e.target.dataset.id;
+      if (f === "lg") { ID.lg = e.target.value; renderIdp(); }
+      else if (f === "grp") { ID.grp = e.target.value; repaintIdp(); }
+    });
+    b.addEventListener("input", e => { if (e.target.dataset.id === "q") { ID.q = e.target.value; repaintIdp(); } });
+    b.addEventListener("click", e => {
+      const pos = e.target.closest("[data-idpos]"), sort = e.target.closest("[data-ik]");
+      if (pos) { ID.pos = pos.dataset.idpos; pos.parentElement.querySelectorAll("button").forEach(z => z.setAttribute("aria-pressed", z === pos)); repaintIdp(); }
+      else if (sort) { const k = sort.dataset.ik; if (ID.key === k) ID.dir *= -1; else { ID.key = k; ID.dir = k === "name" || k === "rank" ? 1 : -1; } repaintIdp(); }
+    });
+  }
+  async function repaintIdp() {
+    const x = (last?.data || []).filter(Boolean).find(l => l.lg.league_id === ID.lg);
+    if (x) paintIdp(x, await idpBoard(x, last.season));
+  }
+
   function setStatus(msg, isErr) {
     $("statusText").innerHTML = isErr ? `<span class="err">${esc(msg)}</span>` : esc(msg);
   }
@@ -2184,6 +2380,7 @@ footer a { color: inherit; }
     let navTimer = null;
     new MutationObserver(() => { clearTimeout(navTimer); navTimer = setTimeout(buildSubnav, 200); }).observe($("wrap"), { childList: true, subtree: true });
     wirePlayerTabs();
+    wireIdp();
     showTab();
     $("pq").addEventListener("input", e => { pState.q = e.target.value; renderPlayers(); });
     $("pf").addEventListener("click", e => {
