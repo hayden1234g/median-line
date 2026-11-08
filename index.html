@@ -519,6 +519,20 @@ footer a { color: inherit; }
   const result = (a, b) => a > b ? "W" : a < b ? "L" : "T";
   const avatar = id => id ? `https://sleepercdn.com/avatars/thumbs/${id}` : null;
 
+  // PHSFFL house rule: the last playoff spot isn't decided by record. It goes to the team with the most
+  // points for among everyone not already in. `order` is already sorted by record; this moves that team
+  // up to the last playoff seed in place.
+  const pfLastSpot = lg => /phsffl/i.test(lg.name || "");
+  function applyPfSpot(order, pt, pfOf) {
+    if (pt < 1 || pt >= order.length) return order;
+    let b = pt - 1;
+    for (let j = pt; j < order.length; j++) if (pfOf(order[j]) > pfOf(order[b])) b = j;
+    const pick = order[b];
+    for (let j = b; j > pt - 1; j--) order[j] = order[j - 1];
+    order[pt - 1] = pick;
+    return order;
+  }
+
   function median(nums) {
     const s = [...nums].sort((a, b) => a - b);
     if (!s.length) return null;
@@ -845,11 +859,13 @@ footer a { color: inherit; }
     const pts = r => (r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100;
     const winVal = r => (r.settings?.wins || 0) + (r.settings?.ties || 0) / 2;
     const standing = [...rosters].sort((a, b) => winVal(b) - winVal(a) || pts(b) - pts(a));
+    const pfSpot = pfLastSpot(lg);
+    if (pfSpot) applyPfSpot(standing, Math.min(s.playoff_teams || 0, rosters.length), pts);
     const byPf = [...rosters].sort((a, b) => pts(b) - pts(a));
     const ms = mine.settings || {};
 
     return {
-      lg, medianGames: s.league_average_match === 1, teams: rosters.length, playoffTeams: s.playoff_teams || 0,
+      lg, pfSpot, medianGames: s.league_average_match === 1, teams: rosters.length, playoffTeams: s.playoff_teams || 0,
       myTeam: teamName(userMap, mine),
       official: { w: ms.wins || 0, l: ms.losses || 0, t: ms.ties || 0 },
       rank: standing.indexOf(mine) + 1,
@@ -1151,7 +1167,7 @@ footer a { color: inherit; }
           <div class="t">
             <h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3>
             <div class="meta"><span class="team">${esc(x.myTeam)}</span><span>${x.teams} teams</span>
-              ${x.medianGames ? '<span class="pill flat">median game on</span>' : ""}</div>
+              ${x.medianGames ? '<span class="pill flat">median game on</span>' : ""}${x.pfSpot ? '<span class="pill flat">last spot: most points</span>' : ""}</div>
           </div>
           <div class="rank"><b class="num">${ord(x.rank)}</b><span>in standings</span></div>
         </div>
@@ -1270,7 +1286,7 @@ footer a { color: inherit; }
   }
 
   // Simulates the rest of the regular season: real schedule, median games where the league plays them,
-  // ties broken on points for. Each simulated season also nudges every team's true strength a little.
+  // ties broken on points for (PHSFFL: last spot to the most points for). Each simulated season also nudges every team's true strength a little.
   function playoffSim(x, model, sched) {
     const s = x.settings, n = x.rosters.length;
     const pt = Math.min(s.playoff_teams || 0, n);
@@ -1316,6 +1332,7 @@ footer a { color: inherit; }
         if (wi === 0) { const o = wk.opp[me]; firstH = o >= 0 ? sc[me] > sc[o] : null; firstM = meBeat; }
       });
       order.sort((a, b) => W[b] - W[a] || PF[b] - PF[a]);
+      if (x.pfSpot) applyPfSpot(order, pt, i => PF[i]);
       for (let r = 0; r < n; r++) { const i = order[r]; seed[i] += r + 1; if (r < pt) playoff[i]++; if (r < byes) bye[i]++; if (r === n - 1) lastPl[i]++; }
       const made = order.indexOf(me) < pt ? 1 : 0;
       if (firstH !== null) { const c = firstH ? cond.hW : cond.hL; c[0]++; c[1] += made; }
@@ -1570,11 +1587,11 @@ footer a { color: inherit; }
     return `<article class="scard ${tank ? "is-tank" : ""}" data-sec="${esc(x.lg.name)}">
       <div>
         <h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3>
-        <div class="meta"><span>${esc(x.myTeam)}</span>${tank ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}</span>` : ""}${x.medianGames ? '<span class="pill flat">median game on</span>' : ""}</div>
+        <div class="meta"><span>${esc(x.myTeam)}</span>${tank ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}</span>` : ""}${x.medianGames ? '<span class="pill flat">median game on</span>' : ""}${x.pfSpot ? '<span class="pill flat">last spot: most points</span>' : ""}</div>
       </div>
       <div class="bigodds">
         ${tank ? `<div><span class="k">Worst record</span><b class="num">${pc(mine.last)}</b><span class="s">chance you finish last</span></div>` : ""}
-        <div><span class="k">Playoffs</span><b class="num">${o.pt ? pc(mine.playoff) : "–"}</b><span class="s">${o.pt ? `top ${o.pt} of ${x.teams}` : "no playoffs set"}</span></div>
+        <div><span class="k">Playoffs</span><b class="num">${o.pt ? pc(mine.playoff) : "–"}</b><span class="s">${!o.pt ? "no playoffs set" : x.pfSpot && o.pt > 1 ? `top ${o.pt - 1} by record + most points of the rest` : `top ${o.pt} of ${x.teams}`}</span></div>
         ${o.byes ? `<div><span class="k">First-round bye</span><b class="num">${pc(mine.bye)}</b><span class="s">top ${o.byes}</span></div>` : ""}
         <div><span class="k">Avg. finish</span><b class="num">${mine.seed.toFixed(1)}</b><span class="s">regular-season seed</span></div>
         <div><span class="k">ROS strength</span><b class="num">${ord(myRank)}</b><span class="s">${f1(m.teams.find(t => t.rid === x.myRosterId).ppw)} pts/wk</span></div>
