@@ -532,6 +532,9 @@ footer a { color: inherit; }
     order[pt - 1] = pick;
     return order;
   }
+  // PHS FFL draft lotto: the teams that miss the playoffs are ranked by max points for (Sleeper's "ppts",
+  // the best possible lineup each week). Lowest 3 are the first lotto group, the next 3 the second.
+  const LOTTO_GROUP = 3;
 
   function median(nums) {
     const s = [...nums].sort((a, b) => a - b);
@@ -1296,6 +1299,10 @@ footer a { color: inherit; }
     const baseW = x.rosters.map(r => (r.settings?.wins || 0) + (r.settings?.ties || 0) / 2);
     const baseL = x.rosters.map(r => r.settings?.losses || 0);
     const basePF = x.rosters.map(r => (r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100);
+    // Max PF so far, and each team's max-to-actual ratio, used to turn simulated scores into simulated max PF.
+    const baseMax = x.rosters.map(r => (r.settings?.ppts || 0) + (r.settings?.ppts_decimal || 0) / 100);
+    const maxRatio = baseMax.map((v, i) => v > 0 && basePF[i] > 0 ? Math.min(1.5, Math.max(1, v / basePF[i])) : 1.15);
+    const lotto = x.pfSpot && baseMax.some(v => v > 0);
     const live = x.liveWeek?.outlook?.teams ? new Map(x.liveWeek.outlook.teams.map(t => [t.rid, t])) : null;
     const romWeek = new Map(model.weeks.map((w, i) => [w, i]));
     const avg = model.teams.map(t => { const v = t.wk.length ? t.wk.reduce((a, [, q]) => a + q, 0) / t.wk.length : 400; return [t.ppw || 90, v]; });
@@ -1316,12 +1323,13 @@ footer a { color: inherit; }
     const S = 4000, draw = gaussian(7 + n);
     const playoff = new Float64Array(n), bye = new Float64Array(n), seed = new Float64Array(n), lastPl = new Float64Array(n);
     const cond = { hW: [0, 0], hL: [0, 0], mW: [0, 0], mL: [0, 0] };   // [sims, made playoffs] by first-game outcome
+    const lotA = new Float64Array(n), lotB = new Float64Array(n), MX = new Float64Array(n);
     const W = new Float64Array(n), PF = new Float64Array(n), sc = new Float64Array(n), off = new Float64Array(n), order = [...Array(n).keys()];
     for (let k = 0; k < S; k++) {
-      for (let i = 0; i < n; i++) { W[i] = baseW[i]; PF[i] = basePF[i]; off[i] = draw() * 0.06 * (avg[i][0] || 100); }
+      for (let i = 0; i < n; i++) { W[i] = baseW[i]; PF[i] = basePF[i]; MX[i] = baseMax[i]; off[i] = draw() * 0.06 * (avg[i][0] || 100); }
       let firstH = null, firstM = null;
       weeks.forEach((wk, wi) => {
-        for (let i = 0; i < n; i++) { sc[i] = Math.max(0, wk.mean[i] + (wk.week === x.curWeek && live ? 0 : off[i]) + wk.sd[i] * draw()); PF[i] += sc[i]; }
+        for (let i = 0; i < n; i++) { sc[i] = Math.max(0, wk.mean[i] + (wk.week === x.curWeek && live ? 0 : off[i]) + wk.sd[i] * draw()); PF[i] += sc[i]; MX[i] += sc[i] * maxRatio[i]; }
         for (let i = 0; i < n; i++) { const o = wk.opp[i]; if (o >= 0) W[i] += sc[i] > sc[o] ? 1 : sc[i] === sc[o] ? 0.5 : 0; }
         let meBeat = null;
         if (x.medianGames) {
@@ -1334,14 +1342,18 @@ footer a { color: inherit; }
       order.sort((a, b) => W[b] - W[a] || PF[b] - PF[a]);
       if (x.pfSpot) applyPfSpot(order, pt, i => PF[i]);
       for (let r = 0; r < n; r++) { const i = order[r]; seed[i] += r + 1; if (r < pt) playoff[i]++; if (r < byes) bye[i]++; if (r === n - 1) lastPl[i]++; }
+      if (lotto) {
+        const out = order.slice(pt).sort((a, b) => MX[a] - MX[b]);
+        out.forEach((i, r) => { if (r < LOTTO_GROUP) lotA[i]++; else if (r < 2 * LOTTO_GROUP) lotB[i]++; });
+      }
       const made = order.indexOf(me) < pt ? 1 : 0;
       if (firstH !== null) { const c = firstH ? cond.hW : cond.hL; c[0]++; c[1] += made; }
       if (firstM !== null) { const c = firstM ? cond.mW : cond.mL; c[0]++; c[1] += made; }
     }
     const rate = c => c[0] ? c[1] / c[0] : null;
     return {
-      pt, byes, firstWeek: weeks[0]?.week ?? null, regLeft: weeks.length,
-      team: rids.map((rid, i) => ({ rid, playoff: playoff[i] / S, bye: bye[i] / S, seed: seed[i] / S, last: lastPl[i] / S })),
+      pt, byes, lotto, firstWeek: weeks[0]?.week ?? null, regLeft: weeks.length,
+      team: rids.map((rid, i) => ({ rid, playoff: playoff[i] / S, bye: bye[i] / S, seed: seed[i] / S, last: lastPl[i] / S, maxPf: baseMax[i], lotA: lotA[i] / S, lotB: lotB[i] / S })),
       me, swing: { winH: rate(cond.hW), loseH: rate(cond.hL), winM: rate(cond.mW), loseM: rate(cond.mL) }
     };
   }
@@ -1569,6 +1581,25 @@ footer a { color: inherit; }
   const pc = p => p == null ? "–" : pctRound(p);
   const dv = n => Math.round(n).toLocaleString();
 
+  function lottoSection(x, o) {
+    const mine = o.team[o.me], g = LOTTO_GROUP;
+    const rows = [...o.team].sort((a, b) => a.maxPf - b.maxPf);
+    return `<div class="swing"><span class="ptiny">Tanking: draft lotto by max points for, among the ${x.teams - o.pt} teams that miss the playoffs</span>
+        <div class="bigodds">
+          <div><span class="k">Bottom ${g} in max PF</span><b class="num">${pc(mine.lotA)}</b><span class="s">lowest ${g} of the non-playoff teams</span></div>
+          <div><span class="k">Next ${g} (${g + 1}–${2 * g})</span><b class="num">${pc(mine.lotB)}</b><span class="s">${ord(g + 1)} to ${ord(2 * g)} lowest</span></div>
+          <div><span class="k">Max PF so far</span><b class="num">${f1(mine.maxPf)}</b><span class="s">${ord(rows.indexOf(mine) + 1)} lowest of ${x.teams}</span></div>
+        </div>
+      </div>
+      <div class="tablewrap"><table class="rank">
+        <thead><tr><th>#</th><th>Team</th><th>Max PF</th><th>Playoffs</th><th>Bottom ${g}</th><th>${g + 1}–${2 * g}</th></tr></thead>
+        <tbody>${rows.map((z, i) => `<tr class="${z.rid === x.myRosterId ? "me" : ""}">
+          <td class="num">${i + 1}</td><td title="${esc(x.nameOf(z.rid))}">${esc(x.nameOf(z.rid))}</td>
+          <td class="num">${f1(z.maxPf)}</td><td class="num">${pc(z.playoff)}</td><td class="num">${pc(z.lotA)}</td><td class="num">${pc(z.lotB)}</td>
+        </tr>`).join("")}</tbody></table></div>
+      <p class="ptiny">Lowest max PF first. Max PF for the rest of the season is estimated from each team's projected scores, scaled by how far its max PF has run ahead of its actual points so far.</p>`;
+  }
+
   function seasonCard(x, r) {
     const o = r.odds, m = r.model, tank = x.tag === "tank";
     const mine = o.team[o.me];
@@ -1608,6 +1639,7 @@ footer a { color: inherit; }
           <td class="num">${i + 1}</td><td title="${esc(x.nameOf(z.t.rid))}">${esc(x.nameOf(z.t.rid))}</td>
           <td class="num">${rec(z.rec)}</td><td class="num">${f1(z.t.ppw)}</td><td class="num">${o.pt ? pc(z.od.playoff) : "–"}</td>${o.byes ? `<td class="num">${pc(z.od.bye)}</td>` : ""}
         </tr>`).join("")}</tbody></table></div>
+      ${o.lotto ? lottoSection(x, o) : ""}
       <details class="weeks"><summary>Your roster, ${d ? "rest of season and dynasty value" : "rest of season"}</summary><div class="tablewrap"><table class="roster">
         <thead><tr><th>Player</th><th>Pos</th>${d ? '<th title="FantasyCalc dynasty trade value">Dynasty</th>' : ""}<th>ROS pts</th><th>Over repl.</th></tr></thead>
         <tbody>${rosterRows.map(v => `<tr>
