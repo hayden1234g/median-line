@@ -522,7 +522,7 @@ footer a { color: inherit; }
   // PHSFFL house rule: the last playoff spot isn't decided by record. It goes to the team with the most
   // points for among everyone not already in. `order` is already sorted by record; this moves that team
   // up to the last playoff seed in place.
-  const pfLastSpot = lg => /phsffl/i.test(lg.name || "");
+  const pfLastSpot = lg => /phs\s*ffl/i.test(lg.name || "");
   function applyPfSpot(order, pt, pfOf) {
     if (pt < 1 || pt >= order.length) return order;
     let b = pt - 1;
