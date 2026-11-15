@@ -292,6 +292,13 @@ table.roster tfoot td:first-child { max-width: none; white-space: normal; }
 .feed .fp { font-weight: 700; font-variant-numeric: tabular-nums; }
 .feed .fp.up, .up { color: var(--good); }
 .feed .fp.down, .down { color: var(--bad); }
+.feed.plays { max-height: 32rem; }
+.feed.plays li { grid-template-columns: 3.6rem minmax(0, 1fr) auto; padding-left: 6px; border-left: 3px solid transparent; }
+.feed.plays li.mine { background: var(--surface-2); border-left-color: var(--good); }
+.feed.plays li.opp { border-left-color: var(--bad); }
+.feed.plays li.mine.opp { border-left-color: var(--muted); }
+.feed.plays time b { display: block; color: var(--fg); font-weight: 600; }
+.logbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; }
 .lcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 14px; }
 .lcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; min-width: 0; align-content: start; }
 .lcard.is-tank { border-style: dashed; }
@@ -653,7 +660,7 @@ footer a { color: inherit; }
       remaining += rem; variance += sd * sd;
       const pos = x?.player?.position || (isNaN(pid) ? "DEF" : "");
       const line = sr?.stats?.gp || g.state === "in" || g.state === "post" ? statLine(sr?.stats, pos) : "";
-      const p = { pid, name: playerName(x, pid), pos, team, actual: m.players_points?.[pid] || 0, full, rem, sd, game: g.label, st: g.state, ball: !!g.ball, red: !!g.ball && !!g.red, line, stats: sr?.stats || {}, inj: x?.player?.injury_status || null };
+      const p = { pid, name: playerName(x, pid), pos, team, actual: m.players_points?.[pid] || 0, full, rem, sd, game: g.label, st: g.state, ball: !!g.ball, red: !!g.ball && !!g.red, line, stats: sr?.stats || {}, inj: x?.player?.injury_status || null, first: x?.player?.first_name || "", last: x?.player?.last_name || "" };
       players.push(p);
       slots.push({ slot, p });
     });
@@ -1779,48 +1786,20 @@ footer a { color: inherit; }
     return parts.filter(Boolean).join(" · ");
   }
 
-  // What changed for one player since the last refresh, in words.
-  function statDiff(a = {}, b = {}) {
-    const d = k => (b[k] || 0) - (a[k] || 0), out = [];
-    for (const [k, l] of [["pass_td", "TD pass"], ["rush_td", "rushing TD"], ["rec_td", "receiving TD"], ["def_td", "defensive TD"], ["pass_int", "INT thrown"], ["fum_lost", "fumble lost"], ["fgm", "FG made"], ["int", "INT"], ["sack", "sack"]])
-      if (d(k) > 0) out.push(d(k) > 1 ? `${d(k)} ${l}s` : l);
-    const y = [["pass_yd", "pass"], ["rush_yd", "rush"], ["rec_yd", "rec"]].filter(([k]) => d(k)).map(([k, l]) => `${d(k) > 0 ? "+" : ""}${d(k)} ${l} yd`);
-    return out.concat(out.length ? [] : y).join(", ");
-  }
-
-  let liveFeed = [], prevLive = null, feedFor = null, oddsHist = {};
+  let feedFor = null, oddsHist = {};
   const readJson = (k, d) => { try { return JSON.parse(store.get(k)) || d; } catch { return d; } };
 
-  // Runs after every load: compares each listed player with the last refresh, and logs win odds over time.
+  // Runs after every load: logs win odds over time.
   function trackLive(user, season, data) {
     const xs = data.filter(x => x?.liveWeek?.outlook?.teams);
     if (!xs.length) return;
     const id = `${user.user_id}.${season}.${xs[0].liveWeek.week}`;
-    if (feedFor !== id) {
-      feedFor = id; prevLive = null;
-      liveFeed = readJson("ml.feed." + id, []);
-      oddsHist = readJson("ml.odds." + id, {});
-    }
-    const tags = getTags(user.user_id), now = new Map(), grouped = new Map(), t = Date.now();
+    if (feedFor !== id) { feedFor = id; oddsHist = readJson("ml.odds." + id, {}); }
+    const t = Date.now();
     for (const x of xs) {
-      const flip = tags[x.lg.league_id] === "tank" ? -1 : 1;
-      for (const q of x.liveWeek.outlook.players) {
-        const key = `${x.lg.league_id}:${q.pid}`;
-        now.set(key, { pts: q.actual, stats: q.stats });
-        const was = prevLive?.get(key);
-        if (!was || Math.abs(q.actual - was.pts) < 0.05) continue;
-        const g = grouped.get(q.pid) || { t, pid: q.pid, name: q.name, pos: q.pos, what: statDiff(was.stats, q.stats), net: 0, lgs: [] };
-        const side = (q.role === "you" ? 1 : -1) * flip, delta = q.actual - was.pts;
-        g.net += side * delta;
-        g.lgs.push(`${side * delta >= 0 ? "helps" : "hurts"} in ${x.lg.name}`);
-        grouped.set(q.pid, g);
-      }
       const o = x.liveWeek.outlook, h = oddsHist[x.lg.league_id] ||= [], top = h[h.length - 1];
       if (o.pWin != null && (!top || Math.abs(top[1] - o.pWin) > 0.002)) { h.push([t, +o.pWin.toFixed(3)]); if (h.length > 240) h.shift(); }
     }
-    prevLive = now;
-    if (grouped.size) liveFeed = [...grouped.values()].concat(liveFeed).slice(0, 80);
-    store.set("ml.feed." + id, JSON.stringify(liveFeed));
     store.set("ml.odds." + id, JSON.stringify(oddsHist));
   }
 
@@ -1911,18 +1890,103 @@ footer a { color: inherit; }
     const alertHtml = alerts.length ? `<section class="card2" data-sec="Alerts"><h2>Check your lineups</h2><ul class="alerts">${alerts.map(([lvl, lg, t]) =>
       `<li><span class="pill ${lvl > 1 ? "L" : "T"}">${lvl > 1 ? "fix" : "watch"}</span>${esc(t)} <span class="ptiny">${esc(lg)}</span></li>`).join("")}</ul></section>` : "";
 
-    const feed = liveFeed.length ? liveFeed.map(f => `<li><time>${new Date(f.t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
-        <span class="fw">${nm(f)}${f.what ? ` ${esc(f.what)}` : ""}<span class="sub">${esc(f.lgs.join(", "))}</span></span>
-        <span class="fp ${f.net >= 0 ? "up" : "down"}">${signed(f.net)}</span></li>`).join("")
-      : `<li><span></span><span class="fw lbl">${cnt("in") ? "Scoring changes for your players and your opponents' show up here as they happen." : "Waiting for games. Scoring changes show up here while this page is open."}</span><span></span></li>`;
-
     el.innerHTML = `<div class="lcol">
       <div class="lhead"><b>Week ${wk}</b><span>${cnt("in")} live · ${cnt("pre")} upcoming · ${cnt("post")} final</span></div>
       ${b.length ? `<section class="games" data-sec="Games" aria-label="NFL games">${games}</section>` : ""}
       ${alertHtml}
-      <section class="card2" data-sec="Just happened"><h2>Just happened</h2><ul class="feed">${feed}</ul></section>
+      <section class="card2" data-sec="Game log"><h2>Game log</h2><div class="logbar" id="logbar"></div><ul class="feed plays" id="plays"></ul><p class="ptiny" id="lognote"></p></section>
       <div class="lcards">${xs.map(liveCard).join("")}</div>
     </div>`;
+    logWatch = buildWatch(xs);
+    drawPlays();
+    fetchPlays(b).then(changed => { if (changed) drawPlays(); });
+  }
+
+  // ===================== Game log: ESPN play-by-play =====================
+  // Every play of this week's started games. Plays are tied to your starters and your opponents' starters
+  // by name ("P.Mahomes") within that player's game; a defense is tied to sacks, turnovers and safeties it forces.
+  const pbp = new Map();                      // ESPN game id -> { plays, state, at }
+  let logWatch = [], logFilter = store.get("ml.logf") || "mine", pbpBusy = false;
+  const LOG_CAP = 400;
+  const reEsc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  function buildWatch(xs) {
+    const by = new Map();
+    for (const x of xs) for (const q of x.liveWeek.outlook.players) {
+      const w = by.get(q.pid) || { pid: q.pid, name: q.name, pos: q.pos, team: q.team, roles: new Set(), lgs: new Set(), re: null };
+      w.roles.add(q.role); w.lgs.add(x.lg.name);
+      if (!w.re && q.pos !== "DEF" && q.first && q.last) {
+        const last = q.last.replace(/\s+(jr\.?|sr\.?|ii|iii|iv|v)$/i, "");
+        w.re = new RegExp(`(^|[^A-Za-z])${reEsc(q.first[0])}[A-Za-z'’]*\\.\\s?${reEsc(last)}(?![A-Za-z])`);
+      }
+      by.set(q.pid, w);
+    }
+    return [...by.values()];
+  }
+
+  async function fetchPlays(board) {
+    if (pbpBusy) return false;
+    const now = Date.now();
+    const need = board.filter(g => {
+      if (g.state === "pre") return false;
+      const c = pbp.get(g.id);
+      return !c || (c.state === "in" && (g.state !== "in" || now - c.at > 45000));
+    });
+    if (!need.length) return false;
+    pbpBusy = true;
+    await Promise.all(need.map(async g => {
+      try {
+        const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${g.id}`);
+        if (!r.ok) return;
+        const d = await r.json(), dr = d.drives || {};
+        const ab = new Map([g.away, g.home].filter(Boolean).map(t => [t.id, t.ab]));
+        const seen = new Set(), plays = [];
+        for (const p of (dr.previous || []).flatMap(x => x.plays || []).concat(dr.current?.plays || [])) {
+          if (!p.text || seen.has(p.id)) continue;
+          seen.add(p.id);
+          const off = ab.get(p.start?.team?.id) || null;
+          plays.push({
+            id: p.id, q: p.period?.number || 0, clock: p.clock?.displayValue || "", text: p.text.trim(), type: p.type?.text || "",
+            score: !!p.scoringPlay, to: !!p.isTurnover, off, def: off ? (off === g.away?.ab ? g.home?.ab : g.away?.ab) : null,
+            away: g.away?.ab, home: g.home?.ab, as: p.awayScore, hs: p.homeScore,
+            wall: p.wallclock ? Date.parse(p.wallclock) : 0, seq: +p.sequenceNumber || 0
+          });
+        }
+        pbp.set(g.id, { plays, state: g.state, at: now });
+      } catch {}
+    }));
+    pbpBusy = false;
+    return true;
+  }
+
+  function playMatches(p) {
+    const hit = [];
+    for (const w of logWatch) {
+      if (w.team !== p.away && w.team !== p.home) continue;
+      if (w.pos === "DEF" ? p.def === w.team && (p.to || /\bsacked\b|\bsafety\b/i.test(p.text)) : w.re && w.re.test(p.text)) hit.push(w);
+    }
+    return hit;
+  }
+
+  function drawPlays() {
+    const ul = $("plays"), bar = $("logbar");
+    if (!ul || !bar) return;
+    const rows = [...pbp.values()].flatMap(c => c.plays)
+      .sort((a, b) => (b.wall - a.wall) || (b.seq - a.seq))
+      .map(p => { const hit = playMatches(p); return { p, hit, mine: hit.some(w => w.roles.has("you")), opp: hit.some(w => w.roles.has("opp")) }; });
+    const n = { mine: rows.filter(r => r.mine).length, opp: rows.filter(r => r.opp).length, all: rows.length };
+    bar.innerHTML = `<div class="seg small" role="group" aria-label="Which plays">
+      ${[["mine", "My players"], ["opp", "Opponents"], ["all", "All plays"]].map(([k, l]) => `<button type="button" data-logf="${k}" aria-pressed="${logFilter === k}">${l} <span class="num">${n[k]}</span></button>`).join("")}
+    </div>`;
+    const shown = rows.filter(r => logFilter === "all" || r[logFilter]);
+    const who = r => r.hit.map(w => `${w.roles.has("you") && w.roles.has("opp") ? "yours & opp's" : w.roles.has("you") ? "yours" : "opp's"} ${esc(w.name)}`).join(", ");
+    ul.innerHTML = shown.slice(0, LOG_CAP).map(r => {
+      const p = r.p, sc = p.score ? `${esc(p.away)} ${p.as}–${p.hs} ${esc(p.home)}` : "";
+      return `<li class="${r.mine ? "mine" : ""} ${r.opp ? "opp" : ""}"><time><b>${p.q > 4 ? "OT" : "Q" + p.q} ${esc(p.clock)}</b>${esc(p.away)}@${esc(p.home)}</time>
+        <span class="fw">${esc(p.text)}${r.hit.length || sc ? `<span class="sub">${[who(r), sc].filter(Boolean).join(" · ")}</span>` : ""}</span>
+        <span>${p.score ? '<span class="pill W">score</span>' : p.to ? '<span class="pill L">turnover</span>' : ""}</span></li>`;
+    }).join("") || `<li><span></span><span class="fw lbl">${pbp.size ? (logFilter === "all" ? "No plays yet." : "No plays involving these players yet.") : "Plays show up here once games kick off."}</span><span></span></li>`;
+    $("lognote").textContent = shown.length > LOG_CAP ? `Showing the latest ${LOG_CAP} of ${shown.length} plays.` : "";
   }
 
   // ===================== Player game log =====================
@@ -2418,6 +2482,11 @@ footer a { color: inherit; }
     $("drawer").addEventListener("click", pick);
     $("burger").addEventListener("click", () => toggleDrawer(true));
     $("scrim").addEventListener("click", () => toggleDrawer(false));
+    $("liveBody").addEventListener("click", e => {
+      const b = e.target.closest("[data-logf]");
+      if (!b) return;
+      logFilter = b.dataset.logf; store.set("ml.logf", logFilter); drawPlays();
+    });
     $("subnav").addEventListener("click", e => {
       const b = e.target.closest("[data-i]");
       if (b) $("subnav")._secs[+b.dataset.i]?.scrollIntoView({ behavior: "smooth", block: "start" });
