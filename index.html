@@ -1436,6 +1436,8 @@ footer a { color: inherit; }
   // everywhere, so they never trend, but happen to be free in one of your leagues.
   const MUST_MIN = 50;      // rostered in at least this share of ESPN leagues
   const ESPN_POS = { 1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DEF" };
+  const ESPN_TEAM_ID = { 1: "ATL", 2: "BUF", 3: "CHI", 4: "CIN", 5: "CLE", 6: "DAL", 7: "DEN", 8: "DET", 9: "GB", 10: "TEN", 11: "IND", 12: "KC", 13: "LV", 14: "LAR", 15: "MIA", 16: "MIN",
+    17: "NE", 18: "NO", 19: "NYG", 20: "NYJ", 21: "PHI", 22: "ARI", 23: "PIT", 24: "LAC", 25: "SF", 26: "SEA", 27: "TB", 28: "WAS", 29: "CAR", 30: "JAX", 33: "BAL", 34: "HOU" };
   const normName = t => String(t || "").toLowerCase().replace(/[^a-z ]/g, "").replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "").replace(/\s/g, "");
   let ownCache = null;
 
@@ -1445,19 +1447,23 @@ footer a { color: inherit; }
       { headers: { "X-Fantasy-Filter": JSON.stringify({ filterActive: { value: true } }) } })
       .then(r => r.ok ? r.json() : Promise.reject(new Error("ESPN " + r.status)))
       .then(rows => {
-        const byPos = new Map(), byName = new Map(), def = new Map();
+        // Same names are common (WR and LB Justin Jefferson, QB and DB Lamar Jackson), so match on
+        // name + NFL team; name + position only when that pair is unique. IDP rows count for the team match.
+        const byTeam = new Map(), byPos = new Map(), def = new Map();
         for (const r of rows) {
           const pos = ESPN_POS[r.defaultPositionId], pct = r.ownership?.percentOwned;
-          if (!pos || pct == null) continue;
+          if (pct == null) continue;
           if (pos === "DEF") { def.set(normName(String(r.fullName).replace("D/ST", "")), pct); continue; }
           const k = normName(r.fullName);
-          byPos.set(`${k}|${pos}`, Math.max(pct, byPos.get(`${k}|${pos}`) || 0));
-          byName.set(k, Math.max(pct, byName.get(k) || 0));
+          const kt = `${k}|${ESPN_TEAM_ID[r.proTeamId] || ""}`, kp = `${k}|${pos}`;
+          byTeam.set(kt, byTeam.has(kt) ? null : pct);              // null = two of them, can't tell which
+          if (pos) byPos.set(kp, byPos.has(kp) ? null : pct);
         }
         return v => {
           if (v.ppos === "DEF") return def.get(normName(v.last)) ?? null;
           const k = normName(`${v.first} ${v.last}`);
-          return byPos.get(`${k}|${v.ppos}`) ?? byName.get(k) ?? null;
+          const t = byTeam.get(`${k}|${v.team || ""}`);
+          return t !== undefined ? t : byPos.get(`${k}|${v.ppos}`) ?? null;
         };
       })
       .catch(e => { console.warn("No rostered percentages:", e); return null; });
