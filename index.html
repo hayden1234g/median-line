@@ -299,6 +299,18 @@ table.roster tfoot td:first-child { max-width: none; white-space: normal; }
 .feed.plays li.mine.opp { border-left-color: var(--muted); }
 .feed.plays time b { display: block; color: var(--fg); font-weight: 600; }
 .logbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; }
+.fchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fchips button { font-size: .74rem; font-weight: 500; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fchips button[aria-pressed="true"] { color: var(--fg); border-color: var(--accent); }
+.fsum { font-size: .82rem; color: var(--muted); flex-basis: 100%; }
+.fsum b { color: var(--fg); }
+.pm { display: flex; flex-wrap: wrap; gap: 3px 6px; font-size: .76rem; margin-top: 3px; }
+.pm > span { display: inline-flex; gap: 5px; align-items: baseline; background: var(--surface-2); border-radius: 5px; padding: 1px 6px; max-width: 100%; }
+.pm .lgn { color: var(--muted); max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm b { font-variant-numeric: tabular-nums; }
+.feed.plays .fp { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.feed.plays .fp .pill { display: block; margin-top: 3px; font-size: .64rem; }
+.feed.plays { padding-right: 12px; scrollbar-gutter: stable; }
 .lcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 14px; }
 .lcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; min-width: 0; align-content: start; }
 .lcard.is-tank { border-style: dashed; }
@@ -1910,14 +1922,18 @@ footer a { color: inherit; }
   const LOG_CAP = 400;
   const reEsc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+  let logLeagues = [];                        // [{ id, name, sc, tank }] for the leagues in the log
   function buildWatch(xs) {
-    const by = new Map();
+    const by = new Map(), tags = last ? getTags(last.user.user_id) : {};
+    logLeagues = xs.map(x => ({ id: x.lg.league_id, name: x.lg.name, sc: x.lg.scoring_settings || {}, tank: tags[x.lg.league_id] === "tank" }));
     for (const x of xs) for (const q of x.liveWeek.outlook.players) {
-      const w = by.get(q.pid) || { pid: q.pid, name: q.name, pos: q.pos, team: q.team, roles: new Set(), lgs: new Set(), re: null };
+      const w = by.get(q.pid) || { pid: q.pid, name: q.name, pos: q.pos, team: q.team, roles: new Set(), lgs: new Set(), in: [], re: null, last: "" };
       w.roles.add(q.role); w.lgs.add(x.lg.name);
+      w.in.push({ id: x.lg.league_id, role: q.role });
       if (!w.re && q.pos !== "DEF" && q.first && q.last) {
         const last = q.last.replace(/\s+(jr\.?|sr\.?|ii|iii|iv|v)$/i, "");
         w.re = new RegExp(`(^|[^A-Za-z])${reEsc(q.first[0])}[A-Za-z'’]*\\.\\s?${reEsc(last)}(?![A-Za-z])`);
+        w.reG = new RegExp(w.re.source, "g");
       }
       by.set(q.pid, w);
     }
@@ -1968,25 +1984,121 @@ footer a { color: inherit; }
     return hit;
   }
 
+  // What a play did for one player, as Sleeper stat keys, read from ESPN's play text. Covers passing,
+  // rushing, receiving, kicking, two-pointers, lost fumbles and team-defense splash plays. It can't see
+  // first-down or game-total bonuses, return yards, or a defense's points allowed.
+  function fgBucket(d) { return d < 20 ? "0_19" : d < 30 ? "20_29" : d < 40 ? "30_39" : d < 50 ? "40_49" : "50p"; }
+  function playStats(p, w) {
+    const t = p.text, st = {};
+    if (/\bNo Play\b/i.test(t) && !/TOUCHDOWN/.test(t)) return st;
+    const td = /TOUCHDOWN/.test(t) && !/NULLIFIED/i.test(t);
+    const m = t.match(/for (-?\d+) yards?/i), yds = m ? +m[1] : /for no gain/i.test(t) ? 0 : 0;
+    if (w.pos === "DEF") {
+      if (p.def !== w.team) return st;
+      if (/\bsacked\b/i.test(t)) st.sack = 1;
+      if (/INTERCEPTED/i.test(t)) st.int = 1;
+      if (/RECOVERED by/i.test(t) && new RegExp(`RECOVERED by ${reEsc(w.team)}\\b`, "i").test(t)) st.fum_rec = 1;
+      if (/\bSAFETY\b/i.test(t)) st.safe = 1;
+      if (td && (st.int || st.fum_rec)) st.def_td = 1;
+      return st;
+    }
+    if (!w.reG) return st;
+    const hits = [...t.matchAll(w.reG)].map(x => x.index);
+    if (!hits.length) return st;
+    const at = hits[0], two = /TWO-POINT CONVERSION/i.test(t), twoOk = two && /ATTEMPT SUCCEEDS/i.test(t);
+    const passAt = t.search(/\bpass\b/i);
+    const fumbled = new RegExp(`${w.re.source}[^.]*FUMBLES`).test(t) && /RECOVERED by/i.test(t) && !new RegExp(`RECOVERED by ${reEsc(w.team)}\\b`, "i").test(t);
+    if (fumbled) st.fum_lost = 1;
+    // Kicks count only for the player named right before them ("H.Butker extra point is GOOD").
+    const fg = t.match(new RegExp(`${w.re.source}\\s+(\\d+) yard field goal is (GOOD|No Good|BLOCKED)`, "i"));
+    if (fg) {
+      fg[1] = fg[2]; fg[2] = fg[3];
+      const d = +fg[1], b = fgBucket(d);
+      if (/GOOD/i.test(fg[2])) { st.fgm = 1; st["fgm_" + b] = 1; st.fgm_yds = d; } else { st.fgmiss = 1; st["fgmiss_" + b] = 1; }
+      return st;
+    }
+    const xp = t.match(new RegExp(`${w.re.source}\\s+extra point is (GOOD|No Good|BLOCKED)`, "i"));
+    if (xp) { if (/GOOD/i.test(xp[2])) st.xpm = 1; else st.xpmiss = 1; return st; }
+    if (passAt >= 0 && at < passAt) {                       // he threw it
+      if (two) { if (twoOk) st.pass_2pt = 1; return st; }
+      st.pass_att = 1;
+      if (/INTERCEPTED/i.test(t)) st.pass_int = 1;
+      else if (!/incomplete/i.test(t) && m) { st.pass_cmp = 1; st.pass_yd = yds; if (td) st.pass_td = 1; }
+      return st;
+    }
+    if (passAt >= 0 && at > passAt) {                       // he was the target
+      if (/INTERCEPTED by/i.test(t) && at > t.search(/INTERCEPTED by/i)) return st;
+      if (two) { if (twoOk) st.rec_2pt = 1; return st; }
+      st.rec_tgt = 1;
+      if (!/incomplete/i.test(t) && !/INTERCEPTED/i.test(t) && m) {
+        st.rec = 1; st.rec_yd = yds; if (td) st.rec_td = 1;
+        const bonus = "bonus_rec_" + String(w.pos).toLowerCase();
+        st[bonus] = 1;
+      }
+      return st;
+    }
+    if (/\bsacked\b|\bkneels\b|\bspiked\b|\bpunts?\b|\bkicks\b/i.test(t)) return st;
+    // he carried it: his name comes first, after any "(Shotgun)"-style formation tags
+    if (!t.slice(0, at + 1).replace(/^\s*(\([^)]*\)\s*)*/, "").replace(/[^A-Za-z]/g, "")) {
+      if (two) { if (twoOk) st.rush_2pt = 1; return st; }
+      if (m || /for no gain/i.test(t)) { st.rush_att = 1; st.rush_yd = yds; if (td) st.rush_td = 1; }
+    }
+    return st;
+  }
+
+  // You and your opponent's fantasy points from one play, per league (only leagues switched on).
+  function playPM(hit, p, off) {
+    const out = [];
+    for (const L of logLeagues) {
+      if (off.has(L.id)) continue;
+      let you = 0, opp = 0, any = false;
+      for (const w of hit) for (const r of w.in) {
+        if (r.id !== L.id) continue;
+        const v = scoreStats(playStats(p, w), L.sc);
+        any = true;
+        if (r.role === "you") you += v; else opp += v;
+      }
+      if (any) out.push({ ...L, you, opp, net: (you - opp) * (L.tank ? -1 : 1) });
+    }
+    return out;
+  }
+
   function drawPlays() {
     const ul = $("plays"), bar = $("logbar");
     if (!ul || !bar) return;
+    const off = new Set(readJson("ml.feedOff", []));
     const rows = [...pbp.values()].flatMap(c => c.plays)
       .sort((a, b) => (b.wall - a.wall) || (b.seq - a.seq))
-      .map(p => { const hit = playMatches(p); return { p, hit, mine: hit.some(w => w.roles.has("you")), opp: hit.some(w => w.roles.has("opp")) }; });
+      .map(p => {
+        // Only players in leagues that are switched on count toward a play.
+        const hit = playMatches(p).filter(w => w.in.some(r => !off.has(r.id)));
+        const role = k => hit.some(w => w.in.some(r => !off.has(r.id) && r.role === k));
+        const pm = hit.length ? playPM(hit, p, off) : [];
+        return { p, hit, pm, net: pm.reduce((a, l) => a + l.net, 0), mine: role("you"), opp: role("opp") };
+      });
+    const tot = rows.reduce((a, r) => { for (const l of r.pm) { a.you += l.you; a.opp += l.opp; a.net += l.net; } return a; }, { you: 0, opp: 0, net: 0 });
+    const pts = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(1);
     const n = { mine: rows.filter(r => r.mine).length, opp: rows.filter(r => r.opp).length, all: rows.length };
     bar.innerHTML = `<div class="seg small" role="group" aria-label="Which plays">
       ${[["mine", "My players"], ["opp", "Opponents"], ["all", "All plays"]].map(([k, l]) => `<button type="button" data-logf="${k}" aria-pressed="${logFilter === k}">${l} <span class="num">${n[k]}</span></button>`).join("")}
-    </div>`;
+    </div>
+    ${logLeagues.length > 1 ? `<div class="fchips" role="group" aria-label="Leagues counted">
+      <button type="button" data-fl="all" aria-pressed="${!off.size}">All leagues</button>
+      ${logLeagues.map(L => `<button type="button" data-fl="${esc(L.id)}" aria-pressed="${!off.has(L.id)}" title="${esc(L.name)}">${esc(L.name)}</button>`).join("")}</div>` : ""}
+    ${tot.you || tot.opp ? `<div class="fsum">From the plays so far: you <b class="up">${pts(tot.you)}</b> · opponents <b class="down">${pts(tot.opp)}</b> · net <b class="${tot.net >= 0 ? "up" : "down"}">${signed(tot.net)}</b></div>` : ""}`;
     const shown = rows.filter(r => logFilter === "all" || r[logFilter]);
     const who = r => r.hit.map(w => `${w.roles.has("you") && w.roles.has("opp") ? "yours & opp's" : w.roles.has("you") ? "yours" : "opp's"} ${esc(w.name)}`).join(", ");
     ul.innerHTML = shown.slice(0, LOG_CAP).map(r => {
       const p = r.p, sc = p.score ? `${esc(p.away)} ${p.as}–${p.hs} ${esc(p.home)}` : "";
+      const moved = r.pm.filter(l => Math.abs(l.you) >= 0.05 || Math.abs(l.opp) >= 0.05);
+      const pill = p.score ? '<span class="pill W">score</span>' : p.to ? '<span class="pill L">turnover</span>' : "";
       return `<li class="${r.mine ? "mine" : ""} ${r.opp ? "opp" : ""}"><time><b>${p.q > 4 ? "OT" : "Q" + p.q} ${esc(p.clock)}</b>${esc(p.away)}@${esc(p.home)}</time>
-        <span class="fw">${esc(p.text)}${r.hit.length || sc ? `<span class="sub">${[who(r), sc].filter(Boolean).join(" · ")}</span>` : ""}</span>
-        <span>${p.score ? '<span class="pill W">score</span>' : p.to ? '<span class="pill L">turnover</span>' : ""}</span></li>`;
+        <span class="fw">${esc(p.text)}${r.hit.length || sc ? `<span class="sub">${[who(r), sc].filter(Boolean).join(" · ")}</span>` : ""}
+          ${moved.length ? `<span class="pm">${moved.map(l => `<span><span class="lgn" title="${esc(l.name)}">${esc(l.name)}</span>You <b class="${l.you > 0 ? "up" : l.you < 0 ? "down" : ""}">${pts(l.you)}</b> Opp <b class="${l.opp > 0 ? "down" : l.opp < 0 ? "up" : ""}">${pts(l.opp)}</b>${l.tank ? " (tank)" : ""}</span>`).join("")}</span>` : ""}</span>
+        <span class="fp">${moved.length ? `<span class="${r.net >= 0 ? "up" : "down"}">${signed(r.net)}</span>` : ""}${pill}</span></li>`;
     }).join("") || `<li><span></span><span class="fw lbl">${pbp.size ? (logFilter === "all" ? "No plays yet." : "No plays involving these players yet.") : "Plays show up here once games kick off."}</span><span></span></li>`;
-    $("lognote").textContent = shown.length > LOG_CAP ? `Showing the latest ${LOG_CAP} of ${shown.length} plays.` : "";
+    $("lognote").textContent = (shown.length > LOG_CAP ? `Showing the latest ${LOG_CAP} of ${shown.length} plays. ` : "") +
+      "Points per play are read from ESPN's play text and scored with each league's settings. They leave out first-down and yardage-milestone bonuses, return yards and a defense's points allowed, so totals can differ a little from Sleeper's.";
   }
 
   // ===================== Player game log =====================
@@ -2483,6 +2595,16 @@ footer a { color: inherit; }
     $("burger").addEventListener("click", () => toggleDrawer(true));
     $("scrim").addEventListener("click", () => toggleDrawer(false));
     $("liveBody").addEventListener("click", e => {
+      const fl = e.target.closest("[data-fl]");
+      if (fl) {
+        let off = new Set(readJson("ml.feedOff", []));
+        if (fl.dataset.fl === "all") off = new Set();
+        else if (off.has(fl.dataset.fl)) off.delete(fl.dataset.fl);
+        else off.add(fl.dataset.fl);
+        store.set("ml.feedOff", JSON.stringify([...off]));
+        drawPlays();
+        return;
+      }
       const b = e.target.closest("[data-logf]");
       if (!b) return;
       logFilter = b.dataset.logf; store.set("ml.logf", logFilter); drawPlays();
