@@ -235,7 +235,9 @@ table.roster tfoot td { font-weight: 600; }
 .rk .none { color: var(--muted); font-size: .86rem; }
 .rklink { width: 100%; font-size: .78rem; }
 .rkbanner { border-color: var(--accent); }
-button.ghost.danger { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); white-space: normal; text-align: left; }
+.rkask { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--bad); background: var(--bad-bg); border-radius: 8px; font-size: .88rem; }
+.rkask .btns { display: flex; gap: 8px; margin-left: auto; }
+button.dangerbtn { background: var(--bad); border-color: var(--bad); color: #fff; }
 .kindrows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; align-items: center; }
 .kindrows .seg { justify-self: start; flex-wrap: wrap; }
 .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
@@ -2649,6 +2651,11 @@ footer a { color: inherit; }
     const saved = loadRanks(last.user.user_id, RK.fmt, RK.tep);
     return { saved, order: saved ? mergedOrder(saved.order, RK.vals) : consOrder(RK.vals) };
   }
+  // Before a reset, a copy over your rankings or an import, the old list is kept under "<key>.prev"
+  // so Restore can bring it back, even after a reload (Undo only lasts while the page is open).
+  const loadPrev = key => { try { const r = JSON.parse(store.get(key + ".prev") || "null"); return r && Array.isArray(r.order) ? r : null; } catch { return null; } };
+  const backup = key => { const raw = store.get(key); if (raw) store.set(key + ".prev", raw); };
+
   function rkEdit(fn) {
     const uid = last.user.user_id, order = [...rkCurrent().order];
     RK.undo.push({ key: curKey(), raw: store.get(curKey()) || "" });
@@ -2712,7 +2719,8 @@ footer a { color: inherit; }
   function paintRanks() {
     const body = $("ranksBody");
     if (!RK.vals || !last) return;
-    const { saved } = rkCurrent(), fl = listLabel();
+    const { saved } = rkCurrent(), fl = listLabel(), prev = loadPrev(curKey());
+    RK.ask = null;
     const dynLeagues = (last.data || []).filter(Boolean).filter(leagueKind);
     const using = dynLeagues.filter(x => qbsOf(x) === RK.fmt && leagueTep(x) === RK.tep).map(x => x.lg.name);
     const pend = RK.pending;
@@ -2739,6 +2747,8 @@ footer a { color: inherit; }
           <button type="button" class="ghost" data-rk="copy" ${RK.copyTo ? "" : "disabled"}>Copy</button>
           ${RK.msg ? `<span class="ptiny">${esc(RK.msg)}</span>` : ""}
         </div>
+        <div class="rkask" role="alertdialog" aria-live="polite" hidden></div>
+        ${prev ? `<div class="pvbar"><button type="button" class="ghost" data-rk="restore">Restore previous rankings</button><span class="ptiny">what you had before your last reset or replace${prev.at ? `, last edited ${new Date(prev.at).toLocaleDateString()}` : ""}</span></div>` : ""}
         <input type="text" class="rklink" readonly hidden aria-label="Rankings link">
         <p class="ptiny">Saved in this browser only, for ${esc(last.user.display_name)}. Anyone who looks up your username on their own device sees plain consensus, not this. Copy link to move your rankings to another device or to share them on purpose. ${using.length ? `Used in ${esc(using.join(", "))}.` : `None of your dynasty or keeper leagues use ${fl} values.`}${RK.tep ? ` TE premium isn't priced by FantasyCalc, so its consensus here is FantasyCalc with TE values ×${TEP[RK.tep].f.toFixed(2)} (TE premium is +${TEP[RK.tep].per} per catch). Each TE setting keeps its own list.` : ""}</p>
       </section>
@@ -2821,14 +2831,37 @@ footer a { color: inherit; }
     }).join("") || `<li><span class="none">No players match.</span></li>`;
   }
 
-  // Second tap within a few seconds confirms; the button says what it's about to do in between.
-  function confirmTap(t, warning) {
-    if (+t.dataset.armed > Date.now()) return true;
-    if (!t.dataset.label) t.dataset.label = t.textContent;
-    t.dataset.armed = Date.now() + 4000;
-    t.textContent = warning; t.classList.add("danger");
-    setTimeout(() => { if (+t.dataset.armed <= Date.now()) { delete t.dataset.armed; t.textContent = t.dataset.label; t.classList.remove("danger"); } }, 4100);
-    return false;
+  // Risky actions ask in a bar below the buttons, with "Yes" on the far side, so a double-click on the
+  // button itself can't confirm. "Yes" also ignores taps for a moment after the bar opens.
+  function askFirst(action, text, yes) {
+    const bar = $("ranksBody").querySelector(".rkask");
+    if (!bar) return;
+    RK.ask = { action, at: Date.now() };
+    bar.hidden = false;
+    bar.innerHTML = `<span>${esc(text)}</span><span class="btns"><button type="button" class="ghost" data-rkno>Cancel</button><button type="button" class="dangerbtn" data-rkyes>${esc(yes)}</button></span>`;
+  }
+  const closeAsk = () => { RK.ask = null; const bar = $("ranksBody").querySelector(".rkask"); if (bar) { bar.hidden = true; bar.innerHTML = ""; } };
+
+  function rkDo(action) {
+    const uid = last.user.user_id;
+    if (action === "undo") {
+      const k = RK.undo.map(u => u.key).lastIndexOf(curKey());
+      if (k < 0) return;
+      const [u] = RK.undo.splice(k, 1);
+      store.set(u.key, u.raw); rankVer++; RK.msg = "Undone."; paintRanks();
+    } else if (action === "reset") {
+      RK.undo.push({ key: curKey(), raw: store.get(curKey()) || "" });
+      backup(curKey());
+      saveRanks(uid, RK.fmt, null, RK.tep); RK.msg = "Back to consensus."; paintRanks();
+    } else if (action === "copy" && RK.copyTo) {
+      const [q, tp] = RK.copyTo.split(".").map(Number), from = listLabel(), order = rkCurrent().order, key = rkKey(uid, q, tp);
+      RK.undo.push({ key, raw: store.get(key) || "" });
+      backup(key);
+      saveRanks(uid, q, order, tp);    // same order, priced on the new setting's curve
+      RK.fmt = q; RK.tep = tp; RK.copyTo = ""; store.set("ml.rkfmt", q); store.set("ml.rktep", tp);
+      RK.msg = `Copied from ${from}. Now editing ${listLabel()}.`;
+      renderRanks();
+    }
   }
 
   function wireRanks() {
@@ -2837,6 +2870,13 @@ footer a { color: inherit; }
     b.addEventListener("click", async e => {
       const t = e.target.closest("button");
       if (!t || !last) return;
+      if ("rkno" in t.dataset) { closeAsk(); return; }
+      if ("rkyes" in t.dataset) {
+        if (!RK.ask || Date.now() - RK.ask.at < 700) return;
+        const a = RK.ask.action; RK.ask = null;
+        rkDo(a);
+        return;
+      }
       if (t.dataset.rktep) { RK.tep = +t.dataset.rktep; store.set("ml.rktep", RK.tep); RK.msg = ""; renderRanks(); return; }
       if (t.dataset.rkfmt) { RK.fmt = +t.dataset.rkfmt; store.set("ml.rkfmt", RK.fmt); RK.msg = ""; renderRanks(); return; }
       if (t.dataset.rkteams) { RK.teams = +t.dataset.rkteams; paintRanks(); return; }
@@ -2851,28 +2891,26 @@ footer a { color: inherit; }
       if (t.dataset.rmtb) { rkEdit(o => o.splice(+t.dataset.rmtb, 1)); return; }
       const uid = last.user.user_id;
       switch (t.dataset.rk) {
-        case "undo": {
-          const k = RK.undo.map(u => u.key).lastIndexOf(curKey());
-          if (k < 0 || !confirmTap(t, "Are you sure? This undoes your last change")) return;
-          const [u] = RK.undo.splice(k, 1);
-          store.set(u.key, u.raw); rankVer++; RK.msg = "Undone."; paintRanks();
+        case "undo":
+          if (RK.undo.some(u => u.key === curKey())) askFirst("undo", "Undo your last change to these rankings?", "Yes, undo");
           break;
-        }
         case "reset":
-          if (!confirmTap(t, "Are you sure? This will reset your current rankings")) return;
-          RK.undo.push({ key: curKey(), raw: store.get(curKey()) || "" });
-          saveRanks(uid, RK.fmt, null, RK.tep); RK.msg = "Back to consensus."; paintRanks();
+          askFirst("reset", `Are you sure? This will reset your current ${listLabel()} rankings to consensus. You can restore them afterward.`, "Yes, reset");
           break;
         case "copy": {
           if (!RK.copyTo) return;
           const [q, tp] = RK.copyTo.split(".").map(Number), dest = `${FMT_LABEL[q]}${tp ? " " + TEP[tp].label : ""}`;
-          if (loadRanks(uid, q, tp) && !confirmTap(t, `Are you sure? This replaces your ${dest} rankings`)) return;
-          const from = listLabel(), order = rkCurrent().order, key = rkKey(uid, q, tp);
-          RK.undo.push({ key, raw: store.get(key) || "" });
-          saveRanks(uid, q, order, tp);    // same order, priced on the new setting's curve
-          RK.fmt = q; RK.tep = tp; RK.copyTo = ""; store.set("ml.rkfmt", q); store.set("ml.rktep", tp);
-          RK.msg = `Copied from ${from}. Now editing ${listLabel()}.`;
-          renderRanks();
+          if (loadRanks(uid, q, tp)) askFirst("copy", `Are you sure? This replaces your ${dest} rankings with these. You can restore the old ones afterward.`, "Yes, replace");
+          else rkDo("copy");
+          break;
+        }
+        case "restore": {
+          const key = curKey(), prev = store.get(key + ".prev");
+          if (!prev) return;
+          const cur = store.get(key) || "";
+          RK.undo.push({ key, raw: cur });
+          store.set(key, prev); store.set(key + ".prev", cur);   // swap, so Restore can be reversed too
+          rankVer++; RK.msg = "Restored."; paintRanks();
           break;
         }
         case "link": {
@@ -2892,6 +2930,7 @@ footer a { color: inherit; }
           RK.tep = p.tep; store.set("ml.rktep", RK.tep);
           RK.vals = tepVals(await fcValues(RK.fmt, 12, 1), RK.tep);
           RK.undo.push({ key: curKey(), raw: store.get(curKey()) || "" });
+          backup(curKey());
           saveRanks(uid, RK.fmt, mergedOrder(p.order, RK.vals), RK.tep);
           clearRankLink(); RK.msg = "Rankings loaded."; paintRanks();
           break;
