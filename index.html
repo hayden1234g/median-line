@@ -216,6 +216,38 @@ tr.mine td { background: rgba(255, 122, 26, .08); }
 .kv div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding: 3px 0; }
 .kv b { font-variant-numeric: tabular-nums; }
 table.roster tfoot td { font-weight: 600; }
+.rk { list-style: none; margin: 0; padding: 0; }
+.rk li { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.rk li.mine { background: var(--surface-2); }
+.rk li.over { box-shadow: inset 0 2px 0 var(--accent); }
+.rk li.tier { grid-template-columns: minmax(0, 1fr) auto; border-bottom: 2px solid var(--accent); color: var(--accent); font: 600 .74rem/1 var(--body); letter-spacing: .05em; text-transform: uppercase; padding: 10px 0 5px; }
+.rk .who { min-width: 0; }
+.rk .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk .who .lbl { display: block; color: var(--muted); font-size: .72rem; }
+.rk .val { text-align: right; font-weight: 600; }
+.rk .val small { display: block; font-size: .7rem; font-weight: 500; }
+.rk .dl.up { color: var(--good); } .rk .dl.down { color: var(--bad); }
+.rk .rkno { width: 3.2rem; padding: 4px 5px; text-align: right; font: inherit; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 5px; -moz-appearance: textfield; }
+.rk .rkno::-webkit-inner-spin-button { -webkit-appearance: none; }
+.rk .rkno:hover, .rk .rkno:focus { border-color: var(--line); background: var(--surface); }
+.rk .ctl { display: flex; gap: 3px; }
+.rk .ctl button { min-width: 28px; padding: 5px 6px; font: 500 .78rem/1 var(--body); color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 5px; }
+.rk .none { color: var(--muted); font-size: .86rem; }
+.rklink { width: 100%; font-size: .78rem; }
+.rkbanner { border-color: var(--accent); }
+.pkwrap summary { cursor: pointer; list-style: none; }
+.pkwrap summary::-webkit-details-marker { display: none; }
+.pkwrap summary h2 { display: inline; }
+.pkwrap summary h2::after { content: " \25BE"; color: var(--muted); font-size: .8em; }
+.pkwrap:not([open]) summary h2::after { content: " \25B8"; }
+.pkwrap > .pvbar { margin: 10px 0; }
+.pkgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 18px; }
+.pk { list-style: none; margin: 4px 0 0; padding: 0; }
+.pk li { display: grid; grid-template-columns: 2.4rem 1fr 3.4rem; gap: 2px 8px; align-items: center; padding: 3px 0; font-size: .86rem; }
+.pk li .ptiny { grid-column: 2 / -1; margin-top: -2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk b { text-align: right; }
+.pk .bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.pk .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 table.roster tfoot tr:first-child td { border-top: 1px solid var(--line); }
 table.roster tfoot td:first-child { max-width: none; white-space: normal; }
 .ptiny { font-size: .78rem; color: var(--muted); }
@@ -473,6 +505,7 @@ footer a { color: inherit; }
   <div class="panel" id="panel-trends" role="tabpanel" hidden><div id="trendsBody"></div></div>
   <div class="panel" id="panel-best" role="tabpanel" hidden><div id="bestBody"></div></div>
   <div class="panel" id="panel-idp" role="tabpanel" hidden><div id="idpBody"></div></div>
+  <div class="panel" id="panel-ranks" role="tabpanel" hidden><div id="ranksBody"></div></div>
 
   <div class="panel" id="panel-season" role="tabpanel" hidden>
     <div id="seasonBody"></div>
@@ -1221,7 +1254,7 @@ footer a { color: inherit; }
   };
   const NAV = [
     ["This week", [["live", "Live"], ["week", "Matchups"]]],
-    ["Players", [["players", "Players"], ["trends", "Trends"], ["best", "Best games"], ["idp", "IDP rankings"]]],
+    ["Players", [["players", "Players"], ["trends", "Trends"], ["best", "Best games"], ["idp", "IDP rankings"], ["ranks", "Dynasty rankings"]]],
     ["Moves", [["moves", "Adds & trades"]]],
     ["Season", [["season", "Season"]]],
     ["Settings", [["settings", "Settings"]]]
@@ -1466,6 +1499,7 @@ footer a { color: inherit; }
   // Dynasty value = FantasyCalc's trade value (built from real dynasty trades), keyed by Sleeper player ID.
   // Used only in dynasty and keeper leagues; it measures long-term worth, not rest-of-season points.
   const leagueKind = x => ({ 2: "dynasty", 1: "keeper" })[x.settings?.type] || null;
+  const qbsOf = x => { const rp = x.lg.roster_positions || []; return rp.includes("SUPER_FLEX") || rp.filter(p => p === "QB").length > 1 ? 2 : 1; };
   const fcCache = new Map();         // "numQbs-numTeams-ppr" -> Promise<Map(sleeperId -> { value, name })>
 
   function fcValues(numQbs, numTeams, ppr) {
@@ -1482,15 +1516,13 @@ footer a { color: inherit; }
   async function dynastyFor(x) {
     const kind = leagueKind(x);
     if (!kind) return null;
-    const rp = x.lg.roster_positions || [];
-    const numQbs = rp.includes("SUPER_FLEX") || rp.filter(p => p === "QB").length > 1 ? 2 : 1;
+    const numQbs = qbsOf(x);
     const recPts = x.lg.scoring_settings?.rec ?? 0;
     const ppr = recPts >= 0.75 ? 1 : recPts >= 0.25 ? 0.5 : 0;
     const [vals, traded] = await Promise.all([
       fcValues(numQbs, x.rosters.length, ppr),
       kind === "dynasty" ? get(`/league/${x.lg.league_id}/traded_picks`).catch(() => []) : []
     ]);
-    const value = pid => vals.get(String(pid))?.value || 0;
     // Future picks (dynasty only): every team owns its own picks unless traded. FantasyCalc prices
     // them by season and round ("2027 1st"), without draft position.
     const picks = new Map(x.rosters.map(r => [r.roster_id, []]));
@@ -1503,21 +1535,31 @@ footer a { color: inherit; }
           if (!v) continue;
           for (const r of x.rosters) {
             const owner = moved.get(`${s}-${rd}-${r.roster_id}`) ?? r.roster_id;
-            picks.get(owner)?.push({ season: s, round: rd, value: v, from: r.roster_id });
+            picks.get(owner)?.push({ season: s, round: rd, id: `FP_${s}_${rd}`, from: r.roster_id });
           }
         }
     }
+    return { kind, numQbs, ppr, vals, picks };
+  }
+
+  // Values for one league: your own rankings when you've made them (see Dynasty rankings), else consensus.
+  function valueDyn(base, x) {
+    const cons = pid => base.vals.get(String(pid))?.value || 0;
+    const mine = last ? myRankValues(last.user.user_id, base.numQbs, base.vals) : null;
+    const value = mine ? pid => mine.value(pid) : cons;
     const teams = new Map(x.rosters.map(r => {
       const players = (r.players || []).reduce((a, p) => a + value(p), 0);
-      const pk = picks.get(r.roster_id).reduce((a, p) => a + p.value, 0);
+      const pk = base.picks.get(r.roster_id).reduce((a, p) => a + value(p.id), 0);
       return [r.roster_id, { players, picks: pk, total: players + pk }];
     }));
     const ranked = [...teams.entries()].sort((a, b) => b[1].total - a[1].total).map(([rid]) => rid);
-    return { kind, numQbs, ppr, vals, value, picks, teams, rank: rid => ranked.indexOf(rid) + 1 };
+    return { ...base, value, cons, custom: !!mine, tier: mine ? mine.tier : () => null, teams, rank: rid => ranked.indexOf(rid) + 1 };
   }
 
   // Dynasty and keeper leagues: 1-for-1 swaps where you gain dynasty value and the other team's
   // projected lineup improves (their reason to say yes), ranked by the dynasty value you gain.
+  // With your own rankings, "gain" is by your values while fairness is still judged on consensus,
+  // so these are the deals where you and the market disagree.
   // Your own lineup can't get worse unless you've tagged the league as tanking.
   function dynastyTradesFor(x, model, dyn) {
     const mineT = model.teams.find(t => t.rid === x.myRosterId);
@@ -1526,8 +1568,8 @@ footer a { color: inherit; }
     for (const t of model.teams) {
       if (t.rid === x.myRosterId) continue;
       for (const a of myTop) for (const b of top(t.r)) {
-        const va = dyn.value(a.pid), vb = dyn.value(b.pid), gain = vb - va;
-        if (gain <= 0 || gain > 0.3 * vb) continue;   // a step up, but close enough to be a real offer
+        const gain = dyn.value(b.pid) - dyn.value(a.pid), cb = dyn.cons(b.pid);
+        if (gain <= 0 || cb - dyn.cons(a.pid) > 0.3 * cb) continue;   // a step up for you, close enough on consensus to be a real offer
         const g2 = model.seasonPts(t.pool.filter(p => p !== b.pid).concat(a.pid)) - t.total;
         if (g2 < 1) continue;
         const g1 = model.seasonPts(mineT.pool.filter(p => p !== a.pid).concat(b.pid)) - mineT.total;
@@ -1585,8 +1627,8 @@ footer a { color: inherit; }
         const x = leagues[i];
         try {
           const model = buildModel(x, projWeeks, weeks);
-          const dyn = dyns[i];
-          out.set(x.lg.league_id, { model, dyn, odds: playoffSim(x, model, scheds[i]), adds: addsFor(x, model, trend), must: mustRosterFor(x, model, pctOf, trend), pctOf, trades: dyn ? dynastyTradesFor(x, model, dyn) : tradesFor(x, model) });
+          const dynBase = dyns[i], dyn = dynBase && valueDyn(dynBase, x);
+          out.set(x.lg.league_id, { model, dynBase, dyn, rankVer, odds: playoffSim(x, model, scheds[i]), adds: addsFor(x, model, trend), must: mustRosterFor(x, model, pctOf, trend), pctOf, trades: dyn ? dynastyTradesFor(x, model, dyn) : tradesFor(x, model) });
         } catch (e) { console.error("Season model failed for", x.lg.name, e); }
         await new Promise(r => setTimeout(r, 0));   // let the page breathe between leagues
       }
@@ -1645,7 +1687,7 @@ footer a { color: inherit; }
         ${o.byes ? `<div><span class="k">First-round bye</span><b class="num">${pc(mine.bye)}</b><span class="s">top ${o.byes}</span></div>` : ""}
         <div><span class="k">Avg. finish</span><b class="num">${mine.seed.toFixed(1)}</b><span class="s">regular-season seed</span></div>
         <div><span class="k">ROS strength</span><b class="num">${ord(myRank)}</b><span class="s">${f1(m.teams.find(t => t.rid === x.myRosterId).ppw)} pts/wk</span></div>
-        ${myDyn ? `<div><span class="k">Dynasty value</span><b class="num">${ord(d.rank(x.myRosterId))}</b><span class="s">${dv(myDyn.total)}${myDyn.picks ? ` incl. ${dv(myDyn.picks)} in picks` : ""}</span></div>` : ""}
+        ${myDyn ? `<div><span class="k">${d.custom ? "Your dynasty value" : "Dynasty value"}</span><b class="num">${ord(d.rank(x.myRosterId))}</b><span class="s">${dv(myDyn.total)}${myDyn.picks ? ` incl. ${dv(myDyn.picks)} in picks` : ""}</span></div>` : ""}
       </div>
       ${o.firstWeek && o.pt ? `<div class="swing"><span class="ptiny">Playoff odds after week ${o.firstWeek}${tank ? " (tanking: lower is better)" : ""}</span>
         ${swingRow("Matchup", sw.winH, sw.loseH, "Win", "Lose")}
@@ -1660,12 +1702,12 @@ footer a { color: inherit; }
         </tr>`).join("")}</tbody></table></div>
       ${o.lotto ? lottoSection(x, o) : ""}
       <details class="weeks"><summary>Your roster, ${d ? "rest of season and dynasty value" : "rest of season"}</summary><div class="tablewrap"><table class="roster">
-        <thead><tr><th>Player</th><th>Pos</th>${d ? '<th title="FantasyCalc dynasty trade value">Dynasty</th>' : ""}<th>ROS pts</th><th>Over repl.</th></tr></thead>
+        <thead><tr><th>Player</th><th>Pos</th>${d ? `<th title="${d.custom ? "Your rankings, on FantasyCalc's value scale" : "FantasyCalc dynasty trade value"}">${d.custom ? "Yours" : "Dynasty"}</th>` : ""}<th>ROS pts</th><th>Over repl.</th></tr></thead>
         <tbody>${rosterRows.map(v => `<tr>
           <td>${nm(v)}${v.inj ? ` <span class="ptiny">${esc(v.inj)}</span>` : ""}${taxi.has(v.pid) ? ' <span class="ptiny">taxi</span>' : ""}</td><td>${esc(v.pos[0])}${v.team && v.pos[0] !== "DEF" ? " · " + esc(v.team) : ""}</td>
-          ${d ? `<td class="num">${d.value(v.pid) ? dv(d.value(v.pid)) : "–"}</td>` : ""}<td class="num">${f1(v.ros)}</td><td class="num">${signed(m.overRepl(v))}</td></tr>`).join("")}</tbody>
+          ${d ? `<td class="num">${d.value(v.pid) ? dv(d.value(v.pid)) : "–"}${d.tier(v.pid) ? ` <span class="ptiny">T${d.tier(v.pid)}</span>` : ""}</td>` : ""}<td class="num">${f1(v.ros)}</td><td class="num">${signed(m.overRepl(v))}</td></tr>`).join("")}</tbody>
         ${d ? `<tfoot><tr><td colspan="2">${myDyn.picks ? "Players" : "Total"}</td><td class="num">${dv(myDyn.players)}</td><td colspan="2"></td></tr>${myDyn.picks ? `<tr><td colspan="2">${d.picks.get(x.myRosterId).length} future picks</td><td class="num">${dv(myDyn.picks)}</td><td colspan="2"></td></tr><tr><td colspan="2">Total</td><td class="num">${dv(myDyn.total)}</td><td colspan="2"></td></tr>` : ""}</tfoot>` : ""}</table></div>
-        ${d ? `<p class="ptiny">ROS pts: Sleeper projections for the rest of this season. Dynasty: FantasyCalc trade value (${d.numQbs === 2 ? "superflex" : "1QB"}, ${x.rosters.length} teams, ${d.ppr} PPR), long-term worth on a 0–10,000+ scale${d.kind === "dynasty" ? "; future picks priced by round, not draft slot" : ""}.</p>` : ""}</details>
+        ${d ? `<p class="ptiny">ROS pts: Sleeper projections for the rest of this season. Dynasty: ${d.custom ? `your ${d.numQbs === 2 ? "superflex" : "1QB"} rankings (Dynasty rankings tab), priced on FantasyCalc's curve, so your #10 gets consensus #10's value` : `FantasyCalc trade value (${d.numQbs === 2 ? "superflex" : "1QB"}, ${x.rosters.length} teams, ${d.ppr} PPR)`}, long-term worth on a 0–10,000+ scale${d.kind === "dynasty" ? "; future picks priced by round, not draft slot" : ""}.</p>` : ""}</details>
     </article>`;
   }
 
@@ -1684,15 +1726,15 @@ footer a { color: inherit; }
         <span class="gain num">+${f1(a.net)}<small>lineup pts ROS</small></span></li>`).join("")
       : `<li><span class="none">No free agent improves your projected lineup right now.</span></li>`;
     const trades = r.trades.length ? r.trades.map(t => t.dv != null ? `<li><span class="what"><span class="verb give">Give</span>${who(t.give)} <span class="verb get">Get</span>${who(t.get)}
-        <span class="sub">with ${esc(x.nameOf(t.rid))} · dynasty ${dv(r.dyn.value(t.give.pid))} → ${dv(r.dyn.value(t.get.pid))} · your lineup ROS ${signed(t.me)} · theirs +${f1(t.them)}</span></span>
-        <span class="gain num">+${dv(t.dv)}<small>dynasty value</small></span></li>` : `<li><span class="what"><span class="verb give">Give</span>${who(t.give)} <span class="verb get">Get</span>${who(t.get)}
+        <span class="sub">with ${esc(x.nameOf(t.rid))} · ${r.dyn.custom ? "your values" : "dynasty"} ${dv(r.dyn.value(t.give.pid))} → ${dv(r.dyn.value(t.get.pid))}${r.dyn.custom && (r.dyn.cons(t.give.pid) !== r.dyn.value(t.give.pid) || r.dyn.cons(t.get.pid) !== r.dyn.value(t.get.pid)) ? ` · consensus ${dv(r.dyn.cons(t.give.pid))} → ${dv(r.dyn.cons(t.get.pid))}` : ""} · your lineup ROS ${signed(t.me)} · theirs +${f1(t.them)}</span></span>
+        <span class="gain num">+${dv(t.dv)}<small>${r.dyn.custom ? "your dynasty value" : "dynasty value"}</small></span></li>` : `<li><span class="what"><span class="verb give">Give</span>${who(t.give)} <span class="verb get">Get</span>${who(t.get)}
         <span class="sub">with ${esc(x.nameOf(t.rid))} · they gain +${f1(t.them)}</span></span>
         <span class="gain num">+${f1(t.me)}<small>your lineup ROS</small></span></li>`).join("")
       : `<li><span class="none">${r.dyn ? "No one-for-one swap gains you dynasty value while helping their lineup." : "No one-for-one swap helps both lineups by projection."}</span></li>`;
     return `<article class="scard ${x.tag === "tank" ? "is-tank" : ""}" data-sec="${esc(x.lg.name)}">
       <div>
         <h3 title="${esc(x.lg.name)}">${esc(x.lg.name)}</h3>
-        <div class="meta"><span>${esc(x.myTeam)}</span>${x.tag === "tank" ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}${r.dyn ? ": trades by dynasty value" : ": ROS value only"}</span>` : ""}${faab != null ? `<span>FAAB left: <b class="num">$${faab}</b></span>` : ""}</div>
+        <div class="meta"><span>${esc(x.myTeam)}</span>${x.tag === "tank" ? '<span class="pill tank">tanking</span>' : ""}${kind ? `<span class="pill flat">${kind}${r.dyn ? (r.dyn.custom ? ": trades by your rankings" : ": trades by dynasty value") : ": ROS value only"}</span>` : ""}${faab != null ? `<span>FAAB left: <b class="num">$${faab}</b></span>` : ""}</div>
       </div>
       <div><p class="eyebrow">Should be rostered</p><ul class="moves">${must}</ul></div>
       <div><p class="eyebrow">Recommended adds</p><ul class="moves">${adds}</ul></div>
@@ -1730,6 +1772,11 @@ footer a { color: inherit; }
     if (res.unavailable) { body.innerHTML = `<p class="loading">${esc(res.unavailable)}</p>`; return; }
     const span = `weeks ${res.weeks[0]}–${res.weeks[res.weeks.length - 1]}`;
     const have = leagues.filter(x => res.out.has(x.lg.league_id));
+    for (const x of have) {   // rankings edited since these were built
+      const e = res.out.get(x.lg.league_id);
+      if (!e.dynBase || e.rankVer === rankVer) continue;
+      e.dyn = valueDyn(e.dynBase, x); e.trades = dynastyTradesFor(x, e.model, e.dyn); e.rankVer = rankVer;
+    }
     if (tab === "season") {
       const comp = have.filter(x => x.tag !== "tank");
       const expBerths = comp.reduce((a, x) => { const o = res.out.get(x.lg.league_id).odds; return a + (o.pt ? o.team[o.me].playoff : 0); }, 0);
@@ -1739,7 +1786,7 @@ footer a { color: inherit; }
       </section>`;
     } else {
       $("movesBody").innerHTML = `<section class="panel">
-        <p class="lede">Ranked by how much each move raises your projected best-lineup points for ${span}. Adds look at every free agent with a projection; drops come from your bench, never your IR. Trade ideas are one-for-one swaps where both teams' projected lineups improve, so the other manager has a reason to say yes. In dynasty and keeper leagues, trade ideas are ranked instead by the dynasty value you gain (FantasyCalc trade values), still only where their projected lineup improves and yours doesn't get worse; adds stay rest-of-season.</p>
+        <p class="lede">Ranked by how much each move raises your projected best-lineup points for ${span}. Adds look at every free agent with a projection; drops come from your bench, never your IR. Trade ideas are one-for-one swaps where both teams' projected lineups improve, so the other manager has a reason to say yes. In dynasty and keeper leagues, trade ideas are ranked instead by the dynasty value you gain (FantasyCalc trade values), still only where their projected lineup improves and yours doesn't get worse; adds stay rest-of-season. If you've made your own Dynasty rankings, the gain is by your values while the offer still has to be close on consensus, so these are the deals where you and the market disagree.</p>
         ${mustSummary(have, res)}
         <div class="scards">${have.map(x => movesCard(x, res.out.get(x.lg.league_id))).join("")}</div>
       </section>`;
@@ -1773,7 +1820,7 @@ footer a { color: inherit; }
     for (const t of TABS) $("panel-" + t).hidden = t !== cur;
     renderNav();
     if (cur === "live") renderLive();
-    if (!quietRender) { renderSeasonTabs(); renderPlayerTabs(); renderIdp(); }
+    if (!quietRender) { renderSeasonTabs(); renderPlayerTabs(); renderIdp(); renderRanks(); }
     buildSubnav();
   }
 
@@ -2500,6 +2547,300 @@ footer a { color: inherit; }
     if (x) paintIdp(x, await idpBoard(x, last.season));
   }
 
+  // ===================== Dynasty rankings =====================
+  // Your own order of FantasyCalc's dynasty board, saved in this browser under your Sleeper account,
+  // one list for superflex and one for 1QB. "|" entries are tier breaks. Values follow the order:
+  // your #10 gets consensus #10's value. Nobody else sees them unless you send your link.
+  let rankVer = 0;                   // bumps on every edit so Season and Moves recompute
+  const RK = { teams: null, fmt: null, pos: "ALL", q: "", undo: [], pending: null, vals: null, drag: null, msg: "" };
+  const RK_FMT = { 2: "sf", 1: "1qb" }, FMT_LABEL = { 2: "superflex", 1: "1QB" };
+  const rkKey = (uid, numQbs) => `ml.ranks.${uid}.${RK_FMT[numQbs]}`;
+  function loadRanks(uid, numQbs) {
+    try { const r = JSON.parse(store.get(rkKey(uid, numQbs)) || "null"); return r && Array.isArray(r.order) && r.order.length ? r : null; } catch { return null; }
+  }
+  function saveRanks(uid, numQbs, order) {
+    // no leading, trailing or doubled tier breaks
+    const clean = order ? order.filter((id, i, a) => id !== "|" || (i > 0 && i < a.length - 1 && a[i - 1] !== "|")) : null;
+    store.set(rkKey(uid, numQbs), clean ? JSON.stringify({ order: clean, at: Date.now() }) : "");
+    rankVer++;
+  }
+  const consOrder = vals => [...vals.entries()].sort((a, b) => b[1].value - a[1].value).map(([id]) => id);
+
+  // A saved order lined up with today's board: players FantasyCalc dropped fall off, new ones slot in at their consensus spot.
+  function mergedOrder(order, vals) {
+    const out = order.filter(id => id === "|" || vals.has(id)), have = new Set(out);
+    consOrder(vals).forEach((id, k) => {
+      if (have.has(id)) return;
+      let n = 0, at = out.length;
+      for (let i = 0; i < out.length; i++) if (out[i] !== "|" && n++ === k) { at = i; break; }
+      out.splice(at, 0, id);
+    });
+    return out;
+  }
+
+  function myRankValues(uid, numQbs, vals) {
+    const saved = loadRanks(uid, numQbs);
+    if (!saved) return null;
+    const order = mergedOrder(saved.order, vals), curve = consOrder(vals).map(id => vals.get(id).value);
+    const at = new Map(), tierOf = new Map();
+    let n = 0, t = 1;
+    for (const id of order) { if (id === "|") { t++; continue; } at.set(id, n++); tierOf.set(id, t); }
+    return { value: pid => curve[at.get(String(pid))] || 0, tier: pid => t > 1 ? tierOf.get(String(pid)) ?? null : null };
+  }
+
+  function rkCurrent() {
+    const saved = loadRanks(last.user.user_id, RK.fmt);
+    return { saved, order: saved ? mergedOrder(saved.order, RK.vals) : consOrder(RK.vals) };
+  }
+  function rkEdit(fn) {
+    const uid = last.user.user_id, order = [...rkCurrent().order];
+    RK.undo.push({ fmt: RK.fmt, raw: store.get(rkKey(uid, RK.fmt)) || "" });
+    if (RK.undo.length > 60) RK.undo.shift();
+    fn(order);
+    saveRanks(uid, RK.fmt, order);
+    RK.msg = "";
+    paintRanks();
+  }
+  const moveItem = (order, from, to) => { const [it] = order.splice(from, 1); order.splice(to > from ? to - 1 : to, 0, it); };
+
+  async function packRanks(order) {
+    let bytes = new TextEncoder().encode(JSON.stringify({ f: RK_FMT[RK.fmt], o: order })), z = "j";
+    if (window.CompressionStream) {
+      bytes = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+      z = "z";
+    }
+    let bin = ""; bytes.forEach(b => { bin += String.fromCharCode(b); });
+    return z + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  async function unpackRanks(str) {
+    let bytes = Uint8Array.from(atob(str.slice(1).replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+    if (str[0] === "z") bytes = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+    const d = JSON.parse(new TextDecoder().decode(bytes));
+    if (!Array.isArray(d.o) || !["sf", "1qb"].includes(d.f)) throw new Error("Not a rankings link");
+    return { numQbs: d.f === "sf" ? 2 : 1, order: d.o.map(String) };
+  }
+  // A shared link carries the rankings in the #fragment, which never leaves the browser.
+  async function readRankLink() {
+    const m = /[#&]ranks=([\w-]+)/.exec(location.hash);
+    if (!m) return;
+    try { RK.pending = await unpackRanks(m[1]); } catch { RK.pending = { bad: true }; }
+    tab = "ranks";
+  }
+  const clearRankLink = () => { RK.pending = null; try { history.replaceState(null, "", location.pathname + location.search); } catch {} };
+
+  async function renderRanks() {
+    if (tab !== "ranks" || !last) return;
+    const body = $("ranksBody");
+    const dynLeagues = (last.data || []).filter(Boolean).filter(leagueKind);
+    if (!RK.fmt) RK.fmt = RK.pending?.numQbs || +store.get("ml.rkfmt") || (dynLeagues.some(x => qbsOf(x) === 2) || !dynLeagues.length ? 2 : 1);
+    if (!body.querySelector(".rk")) body.innerHTML = `<p class="loading">Loading FantasyCalc's dynasty board…</p>`;
+    let vals;
+    try { vals = await fcValues(RK.fmt, 12, 1); }
+    catch { body.innerHTML = `<p class="loading">Couldn't reach FantasyCalc. Try again in a minute.</p>`; return; }
+    if (tab !== "ranks") return;
+    RK.vals = vals;
+    paintRanks();
+  }
+
+  // Pick chart team count: your choice, else your first dynasty league in this format, else 12.
+  function rkTeams() {
+    const lg = (last.data || []).filter(Boolean).find(x => leagueKind(x) === "dynasty" && qbsOf(x) === RK.fmt);
+    return RK.teams || (lg && [10, 12, 14].includes(lg.rosters.length) ? lg.rosters.length : 12);
+  }
+
+  function paintRanks() {
+    const body = $("ranksBody");
+    if (!RK.vals || !last) return;
+    const { saved } = rkCurrent(), fl = FMT_LABEL[RK.fmt];
+    const dynLeagues = (last.data || []).filter(Boolean).filter(leagueKind);
+    const using = dynLeagues.filter(x => qbsOf(x) === RK.fmt).map(x => x.lg.name);
+    const pend = RK.pending;
+    const banner = !pend ? "" : pend.bad
+      ? `<section class="card2 rkbanner"><p>That rankings link is broken or cut off. Ask for a fresh one.</p><div class="pvbar"><button type="button" class="ghost" data-rk="ignore">OK</button></div></section>`
+      : `<section class="card2 rkbanner"><p>This link has <b>${FMT_LABEL[pend.numQbs]}</b> rankings (${pend.order.filter(i => i !== "|").length} players and picks, ${pend.order.filter(i => i === "|").length + 1} tiers). Use them as ${esc(last.user.display_name)}'s ${FMT_LABEL[pend.numQbs]} rankings in this browser? That replaces what's here (Undo brings it back).</p>
+          <div class="pvbar"><button type="button" data-rk="import">Use these rankings</button><button type="button" class="ghost" data-rk="ignore">Ignore</button></div></section>`;
+    body.innerHTML = `<div class="lcol">${banner}
+      <section class="card2" data-sec="Your rankings"><h2>Dynasty rankings</h2>
+        <p class="lede">Start from FantasyCalc's consensus and make it yours: drag a row, tap the arrows, or type a new number in the # box. Add tier breaks where the drop-offs are. Your order sets the dynasty values in Season and Adds &amp; trades for your dynasty and keeper leagues: your #10 gets consensus #10's value.</p>
+        <div class="pvbar">
+          <div class="seg small" role="group" aria-label="Format">${[2, 1].map(q => `<button type="button" data-rkfmt="${q}" aria-pressed="${q === RK.fmt}">${q === 2 ? "Superflex" : "1QB"}</button>`).join("")}</div>
+          <span class="ptiny">${saved ? `Your ${fl} rankings · saved ${new Date(saved.at).toLocaleDateString()}` : `Matching consensus · nothing changed yet`}</span>
+        </div>
+        <div class="pvbar">
+          <button type="button" class="ghost" data-rk="undo" ${RK.undo.some(u => u.fmt === RK.fmt) ? "" : "disabled"}>Undo</button>
+          <button type="button" class="ghost" data-rk="reset" ${saved ? "" : "disabled"}>Reset to current consensus</button>
+          <button type="button" class="ghost" data-rk="link">Copy link</button>
+          ${RK.msg ? `<span class="ptiny">${esc(RK.msg)}</span>` : ""}
+        </div>
+        <input type="text" class="rklink" readonly hidden aria-label="Rankings link">
+        <p class="ptiny">Saved in this browser only, for ${esc(last.user.display_name)}. Anyone who looks up your username on their own device sees plain consensus, not this. Copy link to move your rankings to another device or to share them on purpose. ${using.length ? `Used in ${esc(using.join(", "))}.` : `None of your dynasty or keeper leagues are ${fl}.`}</p>
+      </section>
+      <section class="card2" data-sec="Pick chart"><details class="pkwrap" ${store.get("ml.pkopen") === "0" ? "" : "open"}><summary><h2>Draft pick chart</h2></summary>
+        <div class="pvbar"><span class="ptiny">Consensus value for every pick in the next rookie draft, with the player worth about the same. Teams:</span>
+          <div class="seg small" role="group" aria-label="Teams in the draft">${[10, 12, 14].map(k => `<button type="button" data-rkteams="${k}" aria-pressed="${k === rkTeams()}">${k}</button>`).join("")}</div></div>
+        ${pickChart(RK.vals, rkTeams())}</details></section>
+      <section class="card2" data-sec="Board">
+        <div class="pvbar">
+          <div class="seg small" role="group" aria-label="Position">${["ALL", "QB", "RB", "WR", "TE", "PICK", "MINE"].map(q => `<button type="button" data-rkpos="${q}" aria-pressed="${q === RK.pos}">${q === "MINE" ? "Mine" : q === "PICK" ? "Picks" : q}</button>`).join("")}</div>
+          <input type="search" data-rk="q" placeholder="Search" value="${esc(RK.q)}" autocomplete="off" aria-label="Search players">
+        </div>
+        <ul class="rk"></ul>
+      </section></div>`;
+    paintRankRows();
+    buildSubnav();
+  }
+
+  // Draft pick chart: FantasyCalc prices next year's picks as early/mid/late thirds of each round.
+  // Each slot gets a value by drawing a line through those three (centered on each third),
+  // extended at the ends and kept falling pick to pick. Rough, but it's what the market implies.
+  function pickChart(vals, n) {
+    const next = Math.min(...[...vals.keys()].filter(k => /^FP_\d+_early_0$/.test(k)).map(k => +k.split("_")[1]));
+    if (!isFinite(next)) return `<p class="ptiny">FantasyCalc isn't pricing next year's picks by slot right now.</p>`;
+    const rounds = [0, 1, 2, 3].filter(r => vals.has(`FP_${next}_early_${r}`));
+    const slots = [];
+    for (const r of rounds) {
+      const [E, M, L] = ["early", "mid", "late"].map(t => vals.get(`FP_${next}_${t}_${r}`).value);
+      for (let i = 1; i <= n; i++) {
+        const x = (i - 0.5) / n;   // anchors at 1/6, 1/2, 5/6 of the round
+        const v = x <= 0.5 ? E + (M - E) * (x - 1 / 6) * 3 : M + (L - M) * (x - 0.5) * 3;
+        slots.push({ r: r + 1, i, v });
+      }
+    }
+    slots.forEach((z, k) => { z.v = Math.max(1, k ? Math.min(z.v, slots[k - 1].v) : z.v); });
+    const players = [...vals.entries()].filter(([, v]) => v.pos !== "PICK").map(([id, v]) => ({ id, ...v }));
+    const near = v => players.reduce((b, p) => Math.abs(p.value - v) < Math.abs(b.value - v) ? p : b, players[0]);
+    const top = slots[0].v, lab = z => `${z.r}.${String(z.i).padStart(2, "0")}`;
+    const later = [next + 1, next + 2].flatMap(y => [1, 2].map(r => [y, r, vals.get(`FP_${y}_${r}`)?.value])).filter(z => z[2]);
+    const slotFor = v => slots.reduce((b, z) => Math.abs(z.v - v) < Math.abs(b.v - v) ? z : b, slots[0]);
+    return `<div class="pkgrid">${rounds.map(r => `<div><p class="eyebrow">Round ${r + 1}</p><ul class="pk">${slots.filter(z => z.r === r + 1).map(z => {
+        const pl = near(z.v);
+        return `<li><span class="num">${lab(z)}</span><span class="bar"><i style="width:${(100 * z.v / top).toFixed(1)}%"></i></span><b class="num">${dv(z.v)}</b><span class="ptiny" title="Closest consensus value">≈ ${esc(pl.name)}</span></li>`;
+      }).join("")}</ul></div>`).join("")}</div>
+      ${later.length ? `<p class="ptiny">Later years (no slot yet): ${later.map(([y, r, v]) => `${y} ${ord(r)} ${dv(v)} ≈ ${next} ${lab(slotFor(v))}`).join(" · ")}.</p>` : ""}`;
+  }
+
+  function paintRankRows() {
+    const ul = $("ranksBody").querySelector(".rk");
+    if (!ul) return;
+    const { order } = rkCurrent(), vals = RK.vals;
+    const cons = new Map(consOrder(vals).map((id, i) => [id, i])), curve = consOrder(vals).map(id => vals.get(id).value);
+    const mine = new Set((last.data || []).filter(Boolean).filter(x => leagueKind(x) && qbsOf(x) === RK.fmt).flatMap(x => x.rosters.find(r => r.roster_id === x.myRosterId)?.players || []).map(String));
+    const q = RK.q.trim().toLowerCase();
+    const show = id => { const v = vals.get(id); return (RK.pos === "ALL" || (RK.pos === "MINE" ? mine.has(id) : v.pos === RK.pos)) && (!q || v.name.toLowerCase().includes(q)); };
+    const nPlayers = order.filter(id => id !== "|").length, tiers = order.includes("|");
+    const rows = [];
+    let n = 0, t = 1;
+    order.forEach((id, i) => {
+      if (id === "|") {
+        t++;
+        const tierRow = { tier: t, i };
+        if (rows.length && rows[rows.length - 1].tier) rows[rows.length - 1] = tierRow;   // filtered: keep one break per gap
+        else if (rows.length) rows.push(tierRow);
+        return;
+      }
+      const r = n++;
+      if (show(id)) rows.push({ id, i, r, t });
+    });
+    if (rows.length && rows[rows.length - 1].tier) rows.pop();
+    const ctl = (i, extra = "") => `<span class="ctl"><button type="button" data-mv="-1" data-ix="${i}" aria-label="Move up">&#8593;</button><button type="button" data-mv="1" data-ix="${i}" aria-label="Move down">&#8595;</button>${extra}</span>`;
+    ul.innerHTML = (tiers && rows.length && !rows[0].tier && rows[0].t === 1 ? `<li class="tier"><span>Tier 1</span></li>` : "") + rows.map(z => {
+      if (z.tier) return `<li class="tier" draggable="true" data-ix="${z.i}"><span>Tier ${z.tier}</span>${ctl(z.i, `<button type="button" data-rmtb="${z.i}" aria-label="Remove this tier break">&times;</button>`)}</li>`;
+      const v = vals.get(z.id), d = cons.get(z.id) - z.r, pick = v.pos === "PICK";
+      return `<li draggable="true" data-ix="${z.i}" class="${mine.has(z.id) ? "mine" : ""}">
+        <input class="rkno num" type="number" inputmode="numeric" min="1" max="${nPlayers}" value="${z.r + 1}" data-ix="${z.i}" aria-label="Rank for ${esc(v.name)}">
+        <span class="who">${pick ? `<b>${esc(v.name)}</b>` : nm({ pid: z.id, name: v.name })}<span class="lbl">${pick ? "Draft pick" : esc(v.pos) + (v.team ? " · " + esc(v.team) : "")}${mine.has(z.id) ? " · yours" : ""}</span></span>
+        <span class="val num">${dv(curve[z.r])}${d ? `<small class="dl ${d > 0 ? "up" : "down"}" title="Consensus #${cons.get(z.id) + 1}">${d > 0 ? "&#9650;" : "&#9660;"}${Math.abs(d)}</small>` : ""}</span>
+        ${ctl(z.i, `<button type="button" data-tb="${z.i}" aria-label="Start a new tier below ${esc(v.name)}" title="New tier below">+T</button>`)}</li>`;
+    }).join("") || `<li><span class="none">No players match.</span></li>`;
+  }
+
+  function wireRanks() {
+    const b = $("ranksBody");
+    const visible = () => [...b.querySelectorAll(".rk li[data-ix]")].map(li => +li.dataset.ix);
+    b.addEventListener("click", async e => {
+      const t = e.target.closest("button");
+      if (!t || !last) return;
+      if (t.dataset.rkfmt) { RK.fmt = +t.dataset.rkfmt; store.set("ml.rkfmt", RK.fmt); RK.msg = ""; renderRanks(); return; }
+      if (t.dataset.rkteams) { RK.teams = +t.dataset.rkteams; paintRanks(); return; }
+      if (t.dataset.rkpos) { RK.pos = t.dataset.rkpos; t.parentElement.querySelectorAll("button").forEach(z => z.setAttribute("aria-pressed", z === t)); paintRankRows(); return; }
+      if (t.dataset.mv) {
+        const ix = +t.dataset.ix, vis = visible(), k = vis.indexOf(ix), dir = +t.dataset.mv, nb = vis[k + dir];
+        if (nb == null) return;
+        rkEdit(o => moveItem(o, ix, dir < 0 ? nb : nb + 1));
+        return;
+      }
+      if (t.dataset.tb) { rkEdit(o => o.splice(+t.dataset.tb + 1, 0, "|")); return; }
+      if (t.dataset.rmtb) { rkEdit(o => o.splice(+t.dataset.rmtb, 1)); return; }
+      const uid = last.user.user_id;
+      switch (t.dataset.rk) {
+        case "undo": {
+          const k = RK.undo.map(u => u.fmt).lastIndexOf(RK.fmt);
+          if (k < 0) return;
+          const [u] = RK.undo.splice(k, 1);
+          store.set(rkKey(uid, RK.fmt), u.raw); rankVer++; RK.msg = "Undone."; paintRanks();
+          break;
+        }
+        case "reset":
+          if (!confirm(`Reset your ${FMT_LABEL[RK.fmt]} rankings to FantasyCalc's current consensus? Your order and tiers are replaced (Undo works until you leave the page).`)) return;
+          RK.undo.push({ fmt: RK.fmt, raw: store.get(rkKey(uid, RK.fmt)) || "" });
+          saveRanks(uid, RK.fmt, null); RK.msg = "Back to consensus."; paintRanks();
+          break;
+        case "link": {
+          const link = `${location.origin}${location.pathname}#ranks=${await packRanks(rkCurrent().order)}`;
+          const box = b.querySelector(".rklink");
+          box.hidden = false; box.value = link; box.select();
+          let ok = false;
+          try { await navigator.clipboard.writeText(link); ok = true; } catch {}
+          RK.msg = ok ? "Link copied." : "Copy the link below.";
+          const span = t.parentElement.querySelector(".ptiny") || t.parentElement.appendChild(Object.assign(document.createElement("span"), { className: "ptiny" }));
+          span.textContent = RK.msg;
+          break;
+        }
+        case "import": {
+          const p = RK.pending;
+          RK.fmt = p.numQbs; store.set("ml.rkfmt", RK.fmt);
+          RK.vals = await fcValues(RK.fmt, 12, 1);
+          RK.undo.push({ fmt: RK.fmt, raw: store.get(rkKey(uid, RK.fmt)) || "" });
+          saveRanks(uid, RK.fmt, mergedOrder(p.order, RK.vals));
+          clearRankLink(); RK.msg = "Rankings loaded."; paintRanks();
+          break;
+        }
+        case "ignore": clearRankLink(); paintRanks(); break;
+      }
+    });
+    b.addEventListener("toggle", e => { if (e.target.classList?.contains("pkwrap")) store.set("ml.pkopen", e.target.open ? "1" : "0"); }, true);
+    b.addEventListener("input", e => { if (e.target.dataset.rk === "q") { RK.q = e.target.value; paintRankRows(); } });
+    b.addEventListener("change", e => {
+      if (!e.target.classList.contains("rkno")) return;
+      const ix = +e.target.dataset.ix, want = Math.max(1, Math.round(+e.target.value || 1));
+      rkEdit(o => {
+        const [it] = o.splice(ix, 1);
+        let n = 0, at = o.length;
+        for (let i = 0; i < o.length; i++) if (o[i] !== "|" && ++n === want) { at = i; break; }
+        o.splice(at, 0, it);
+      });
+    });
+    b.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.classList.contains("rkno")) e.target.blur(); });
+    b.addEventListener("dragstart", e => { const li = e.target.closest?.("li[data-ix]"); if (!li) return; RK.drag = +li.dataset.ix; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", li.dataset.ix); });
+    b.addEventListener("dragover", e => {
+      const li = e.target.closest?.(".rk li[data-ix]");
+      if (!li || RK.drag == null) return;
+      e.preventDefault();
+      b.querySelectorAll(".rk li.over").forEach(z => z !== li && z.classList.remove("over"));
+      li.classList.add("over");
+    });
+    b.addEventListener("dragleave", e => e.target.closest?.("li")?.classList.remove("over"));
+    b.addEventListener("drop", e => {
+      const li = e.target.closest?.(".rk li[data-ix]");
+      if (!li || RK.drag == null) return;
+      e.preventDefault();
+      const from = RK.drag, to = +li.dataset.ix;
+      RK.drag = null;
+      if (from !== to) rkEdit(o => moveItem(o, from, to));
+    });
+    b.addEventListener("dragend", () => { RK.drag = null; b.querySelectorAll(".rk li.over").forEach(z => z.classList.remove("over")); });
+  }
+
   function setStatus(msg, isErr) {
     $("statusText").innerHTML = isErr ? `<span class="err">${esc(msg)}</span>` : esc(msg);
   }
@@ -2621,6 +2962,8 @@ footer a { color: inherit; }
     new MutationObserver(() => { clearTimeout(navTimer); navTimer = setTimeout(buildSubnav, 200); }).observe($("wrap"), { childList: true, subtree: true });
     wirePlayerTabs();
     wireIdp();
+    wireRanks();
+    await readRankLink();
     showTab();
     $("pq").addEventListener("input", e => { pState.q = e.target.value; renderPlayers(); });
     $("pf").addEventListener("click", e => {
