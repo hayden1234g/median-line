@@ -235,6 +235,7 @@ table.roster tfoot td { font-weight: 600; }
 .rk .none { color: var(--muted); font-size: .86rem; }
 .rklink { width: 100%; font-size: .78rem; }
 .rkbanner { border-color: var(--accent); }
+button.ghost.danger { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); white-space: normal; text-align: left; }
 .kindrows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; align-items: center; }
 .kindrows .seg { justify-self: start; flex-wrap: wrap; }
 .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
@@ -2606,7 +2607,7 @@ footer a { color: inherit; }
   // one list for superflex and one for 1QB. "|" entries are tier breaks. Values follow the order:
   // your #10 gets consensus #10's value. Nobody else sees them unless you send your link.
   let rankVer = 0;                   // bumps on every edit so Season and Moves recompute
-  const RK = { teams: null, fmt: null, tep: null, pos: "ALL", q: "", undo: [], pending: null, vals: null, drag: null, msg: "" };
+  const RK = { copyTo: "", teams: null, fmt: null, tep: null, pos: "ALL", q: "", undo: [], pending: null, vals: null, drag: null, msg: "" };
   const RK_FMT = { 2: "sf", 1: "1qb" }, FMT_LABEL = { 2: "superflex", 1: "1QB" };
   const rkKey = (uid, numQbs, tep = 0) => `ml.ranks.${uid}.${RK_FMT[numQbs]}${tep ? "." + TEP[tep].k : ""}`;
   const curKey = () => rkKey(last.user.user_id, RK.fmt, RK.tep);
@@ -2731,6 +2732,11 @@ footer a { color: inherit; }
           <button type="button" class="ghost" data-rk="undo" ${RK.undo.some(u => u.key === curKey()) ? "" : "disabled"}>Undo</button>
           <button type="button" class="ghost" data-rk="reset" ${saved ? "" : "disabled"}>Reset to current consensus</button>
           <button type="button" class="ghost" data-rk="link">Copy link</button>
+        </div>
+        <div class="pvbar">
+          <select data-rk="copyto" aria-label="Copy these rankings to another scoring setting"><option value="">Copy these rankings to…</option>${[2, 1].flatMap(q => [0, 1, 2].map(t => [q, t])).filter(([q, t]) => q !== RK.fmt || t !== RK.tep)
+            .map(([q, t]) => `<option value="${q}.${t}" ${RK.copyTo === `${q}.${t}` ? "selected" : ""}>${FMT_LABEL[q] === "1QB" ? "1QB" : "Superflex"} · ${TEP[t].label}${loadRanks(last.user.user_id, q, t) ? " (has your rankings)" : ""}</option>`).join("")}</select>
+          <button type="button" class="ghost" data-rk="copy" ${RK.copyTo ? "" : "disabled"}>Copy</button>
           ${RK.msg ? `<span class="ptiny">${esc(RK.msg)}</span>` : ""}
         </div>
         <input type="text" class="rklink" readonly hidden aria-label="Rankings link">
@@ -2815,6 +2821,16 @@ footer a { color: inherit; }
     }).join("") || `<li><span class="none">No players match.</span></li>`;
   }
 
+  // Second tap within a few seconds confirms; the button says what it's about to do in between.
+  function confirmTap(t, warning) {
+    if (+t.dataset.armed > Date.now()) return true;
+    if (!t.dataset.label) t.dataset.label = t.textContent;
+    t.dataset.armed = Date.now() + 4000;
+    t.textContent = warning; t.classList.add("danger");
+    setTimeout(() => { if (+t.dataset.armed <= Date.now()) { delete t.dataset.armed; t.textContent = t.dataset.label; t.classList.remove("danger"); } }, 4100);
+    return false;
+  }
+
   function wireRanks() {
     const b = $("ranksBody");
     const visible = () => [...b.querySelectorAll(".rk li[data-ix]")].map(li => +li.dataset.ix);
@@ -2837,16 +2853,28 @@ footer a { color: inherit; }
       switch (t.dataset.rk) {
         case "undo": {
           const k = RK.undo.map(u => u.key).lastIndexOf(curKey());
-          if (k < 0) return;
+          if (k < 0 || !confirmTap(t, "Are you sure? This undoes your last change")) return;
           const [u] = RK.undo.splice(k, 1);
           store.set(u.key, u.raw); rankVer++; RK.msg = "Undone."; paintRanks();
           break;
         }
         case "reset":
-          if (!confirm(`Reset your ${listLabel()} rankings to current consensus? Your order and tiers are replaced (Undo works until you leave the page).`)) return;
+          if (!confirmTap(t, "Are you sure? This will reset your current rankings")) return;
           RK.undo.push({ key: curKey(), raw: store.get(curKey()) || "" });
           saveRanks(uid, RK.fmt, null, RK.tep); RK.msg = "Back to consensus."; paintRanks();
           break;
+        case "copy": {
+          if (!RK.copyTo) return;
+          const [q, tp] = RK.copyTo.split(".").map(Number), dest = `${FMT_LABEL[q]}${tp ? " " + TEP[tp].label : ""}`;
+          if (loadRanks(uid, q, tp) && !confirmTap(t, `Are you sure? This replaces your ${dest} rankings`)) return;
+          const from = listLabel(), order = rkCurrent().order, key = rkKey(uid, q, tp);
+          RK.undo.push({ key, raw: store.get(key) || "" });
+          saveRanks(uid, q, order, tp);    // same order, priced on the new setting's curve
+          RK.fmt = q; RK.tep = tp; RK.copyTo = ""; store.set("ml.rkfmt", q); store.set("ml.rktep", tp);
+          RK.msg = `Copied from ${from}. Now editing ${listLabel()}.`;
+          renderRanks();
+          break;
+        }
         case "link": {
           const link = `${location.origin}${location.pathname}#ranks=${await packRanks(rkCurrent().order)}`;
           const box = b.querySelector(".rklink");
@@ -2878,6 +2906,12 @@ footer a { color: inherit; }
       leagueChanged(false);
     });
     b.addEventListener("toggle", e => { if (e.target.classList?.contains("pkwrap")) store.set("ml.pkopen", e.target.open ? "1" : "0"); }, true);
+    b.addEventListener("change", e => {
+      if (e.target.dataset.rk !== "copyto") return;
+      RK.copyTo = e.target.value;
+      const btn = b.querySelector('[data-rk="copy"]');
+      btn.disabled = !RK.copyTo;
+    });
     b.addEventListener("input", e => { if (e.target.dataset.rk === "q") { RK.q = e.target.value; paintRankRows(); } });
     b.addEventListener("change", e => {
       if (!e.target.classList.contains("rkno")) return;
