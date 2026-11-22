@@ -1918,7 +1918,7 @@ footer a { color: inherit; }
   // Every play of this week's started games. Plays are tied to your starters and your opponents' starters
   // by name ("P.Mahomes") within that player's game; a defense is tied to sacks, turnovers and safeties it forces.
   const pbp = new Map();                      // ESPN game id -> { plays, state, at }
-  let logWatch = [], logFilter = store.get("ml.logf") || "mine", pbpBusy = false;
+  let logWatch = [], logFilter = store.get("ml.logf") === "all" ? "all" : "match", pbpBusy = false;
   const LOG_CAP = 400;
   const reEsc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -2078,15 +2078,15 @@ footer a { color: inherit; }
       });
     const tot = rows.reduce((a, r) => { for (const l of r.pm) { a.you += l.you; a.opp += l.opp; a.net += l.net; } return a; }, { you: 0, opp: 0, net: 0 });
     const pts = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(1);
-    const n = { mine: rows.filter(r => r.mine).length, opp: rows.filter(r => r.opp).length, all: rows.length };
+    const n = { match: rows.filter(r => r.mine || r.opp).length, all: rows.length };
     bar.innerHTML = `<div class="seg small" role="group" aria-label="Which plays">
-      ${[["mine", "My players"], ["opp", "Opponents"], ["all", "All plays"]].map(([k, l]) => `<button type="button" data-logf="${k}" aria-pressed="${logFilter === k}">${l} <span class="num">${n[k]}</span></button>`).join("")}
+      ${[["match", "My matchups"], ["all", "All plays"]].map(([k, l]) => `<button type="button" data-logf="${k}" aria-pressed="${logFilter === k}">${l} <span class="num">${n[k]}</span></button>`).join("")}
     </div>
     ${logLeagues.length > 1 ? `<div class="fchips" role="group" aria-label="Leagues counted">
       <button type="button" data-fl="all" aria-pressed="${!off.size}">All leagues</button>
       ${logLeagues.map(L => `<button type="button" data-fl="${esc(L.id)}" aria-pressed="${!off.has(L.id)}" title="${esc(L.name)}">${esc(L.name)}</button>`).join("")}</div>` : ""}
     ${tot.you || tot.opp ? `<div class="fsum">From the plays so far: you <b class="up">${pts(tot.you)}</b> · opponents <b class="down">${pts(tot.opp)}</b> · net <b class="${tot.net >= 0 ? "up" : "down"}">${signed(tot.net)}</b></div>` : ""}`;
-    const shown = rows.filter(r => logFilter === "all" || r[logFilter]);
+    const shown = rows.filter(r => logFilter === "all" || r.mine || r.opp);
     const who = r => r.hit.map(w => `${w.roles.has("you") && w.roles.has("opp") ? "yours & opp's" : w.roles.has("you") ? "yours" : "opp's"} ${esc(w.name)}`).join(", ");
     ul.innerHTML = shown.slice(0, LOG_CAP).map(r => {
       const p = r.p, sc = p.score ? `${esc(p.away)} ${p.as}–${p.hs} ${esc(p.home)}` : "";
