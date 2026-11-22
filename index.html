@@ -235,6 +235,25 @@ table.roster tfoot td { font-weight: 600; }
 .rk .none { color: var(--muted); font-size: .86rem; }
 .rklink { width: 100%; font-size: .78rem; }
 .rkbanner { border-color: var(--accent); }
+.kindrows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+.kindrows .seg { justify-self: start; flex-wrap: wrap; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.tcsum { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tcsum > div { background: var(--surface-2); border-radius: 8px; padding: 9px 11px; min-width: 0; }
+.tcsum .eyebrow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcsum .tot { margin: 6px 0 0; font: 600 1.5rem/1 var(--display); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; font-size: .78rem; }
+.verdict { margin: 0; font-size: 1rem; }
+.tcgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.tcgrid select { max-width: 100%; }
+.tclist { list-style: none; margin: 0; padding: 0; max-height: 26rem; overflow-y: auto; }
+.tclist li.sep { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; padding: 10px 0 4px; }
+.tclist button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; text-align: left; background: transparent; color: var(--fg); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 6px 4px; font-weight: 400; }
+.tclist button[aria-pressed="true"] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+.tclist .who { min-width: 0; }
+.tclist .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.tclist .who .lbl { display: block; color: var(--muted); font-size: .72rem; }
 .tepbar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
 .pkwrap summary { cursor: pointer; list-style: none; }
 .pkwrap summary::-webkit-details-marker { display: none; }
@@ -511,6 +530,8 @@ footer a { color: inherit; }
   <div class="panel" id="panel-season" role="tabpanel" hidden>
     <div id="seasonBody"></div>
   </div>
+
+  <div class="panel" id="panel-trade" role="tabpanel" hidden><div id="tradeBody"></div></div>
 
   <div class="panel" id="panel-moves" role="tabpanel" hidden>
     <div id="movesBody"></div>
@@ -1256,7 +1277,7 @@ footer a { color: inherit; }
   const NAV = [
     ["This week", [["live", "Live"], ["week", "Matchups"]]],
     ["Players", [["players", "Players"], ["trends", "Trends"], ["best", "Best games"], ["idp", "IDP rankings"], ["ranks", "Dynasty rankings"]]],
-    ["Moves", [["moves", "Adds & trades"]]],
+    ["Moves", [["moves", "Adds & trades"], ["trade", "Trade calculator"]]],
     ["Season", [["season", "Season"]]],
     ["Settings", [["settings", "Settings"]]]
   ];
@@ -1499,8 +1520,12 @@ footer a { color: inherit; }
 
   // Dynasty value = FantasyCalc's trade value (built from real dynasty trades), keyed by Sleeper player ID.
   // Used only in dynasty and keeper leagues; it measures long-term worth, not rest-of-season points.
-  const leagueKind = x => ({ 2: "dynasty", 1: "keeper" })[x.settings?.type] || null;
-  const qbsOf = x => { const rp = x.lg.roster_positions || []; return rp.includes("SUPER_FLEX") || rp.filter(p => p === "QB").length > 1 ? 2 : 1; };
+  // What kind of league this is: Sleeper's settings unless you've said otherwise (Trade calculator tab).
+  const lgCfg = x => { try { return JSON.parse(store.get("ml.lg." + x.lg.league_id) || "{}") || {}; } catch { return {}; } };
+  const sleeperKind = x => ({ 2: "dynasty", 1: "keeper" })[x.settings?.type] || null;
+  const leagueKind = x => { const k = lgCfg(x).kind; return k === "redraft" ? null : k === "keeper" || k === "dynasty" ? k : sleeperKind(x); };
+  const sleeperQbs = x => { const rp = x.lg.roster_positions || []; return rp.includes("SUPER_FLEX") || rp.filter(p => p === "QB").length > 1 ? 2 : 1; };
+  const qbsOf = x => [1, 2].includes(lgCfg(x).qbs) ? lgCfg(x).qbs : sleeperQbs(x);
   // TE premium: FantasyCalc doesn't price it, so TE values get a flat bump, our rough estimate of
   // what +0.5 or +1 point per TE catch is worth. A league follows its Sleeper scoring unless you pick.
   const TEP = [{ k: "", label: "Standard", f: 1 }, { k: "tep", label: "TE premium", f: 1.15, per: 0.5 }, { k: "tep2", label: "TE super premium", f: 1.3, per: 1 }];
@@ -1515,10 +1540,10 @@ footer a { color: inherit; }
   }
   const fcCache = new Map();         // "numQbs-numTeams-ppr" -> Promise<Map(sleeperId -> { value, name })>
 
-  function fcValues(numQbs, numTeams, ppr) {
-    const key = `${numQbs}-${numTeams}-${ppr}`;
+  function fcValues(numQbs, numTeams, ppr, dynasty = true) {
+    const key = `${numQbs}-${numTeams}-${ppr}-${dynasty}`;
     if (!fcCache.has(key)) {
-      fcCache.set(key, fetch(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=${numQbs}&numTeams=${numTeams}&ppr=${ppr}`)
+      fcCache.set(key, fetch(`https://api.fantasycalc.com/values/current?isDynasty=${dynasty}&numQbs=${numQbs}&numTeams=${numTeams}&ppr=${ppr}`)
         .then(r => { if (!r.ok) throw new Error(`FantasyCalc returned ${r.status}`); return r.json(); })
         .then(rows => new Map(rows.filter(z => z.player?.sleeperId).map(z => [String(z.player.sleeperId), { value: z.value, name: z.player.name, pos: z.player.position, team: z.player.maybeTeam }]))));
       fcCache.get(key).catch(() => fcCache.delete(key));
@@ -1526,14 +1551,14 @@ footer a { color: inherit; }
     return fcCache.get(key);
   }
 
-  async function dynastyFor(x) {
+  async function dynastyFor(x, redraftToo = false) {
     const kind = leagueKind(x);
-    if (!kind) return null;
+    if (!kind && !redraftToo) return null;
     const numQbs = qbsOf(x);
     const recPts = x.lg.scoring_settings?.rec ?? 0;
     const ppr = recPts >= 0.75 ? 1 : recPts >= 0.25 ? 0.5 : 0;
     const [vals, traded] = await Promise.all([
-      fcValues(numQbs, x.rosters.length, ppr),
+      fcValues(numQbs, x.rosters.length, ppr, !!kind),
       kind === "dynasty" ? get(`/league/${x.lg.league_id}/traded_picks`).catch(() => []) : []
     ]);
     // Future picks (dynasty only): every team owns its own picks unless traded. FantasyCalc prices
@@ -1559,7 +1584,7 @@ footer a { color: inherit; }
   function valueDyn(base, x) {
     const tep = leagueTep(x), vals = tepVals(base.vals, tep);
     const cons = pid => vals.get(String(pid))?.value || 0;
-    const mine = last ? myRankValues(last.user.user_id, base.numQbs, vals, tep) : null;
+    const mine = last && base.kind ? myRankValues(last.user.user_id, base.numQbs, vals, tep) : null;
     const value = mine ? pid => mine.value(pid) : cons;
     const teams = new Map(x.rosters.map(r => {
       const players = (r.players || []).reduce((a, p) => a + value(p), 0);
@@ -1843,7 +1868,7 @@ footer a { color: inherit; }
     for (const t of TABS) $("panel-" + t).hidden = t !== cur;
     renderNav();
     if (cur === "live") renderLive();
-    if (!quietRender) { renderSeasonTabs(); renderPlayerTabs(); renderIdp(); renderRanks(); }
+    if (!quietRender) { renderSeasonTabs(); renderPlayerTabs(); renderIdp(); renderRanks(); renderTrade(); }
     buildSubnav();
   }
 
@@ -2844,8 +2869,7 @@ footer a { color: inherit; }
       const t = e.target.closest("[data-teplg]");
       if (!t) return;
       store.set("ml.tep." + t.dataset.teplg, t.dataset.tep);
-      rankVer++;
-      renderSeasonTabs();
+      leagueChanged(false);
     });
     b.addEventListener("toggle", e => { if (e.target.classList?.contains("pkwrap")) store.set("ml.pkopen", e.target.open ? "1" : "0"); }, true);
     b.addEventListener("input", e => { if (e.target.dataset.rk === "q") { RK.q = e.target.value; paintRankRows(); } });
@@ -2878,6 +2902,165 @@ footer a { color: inherit; }
       if (from !== to) rkEdit(o => moveItem(o, from, to));
     });
     b.addEventListener("dragend", () => { RK.drag = null; b.querySelectorAll(".rk li.over").forEach(z => z.classList.remove("over")); });
+  }
+
+  // ===================== Trade calculator =====================
+  // Any two teams in a league, any players and picks. Values follow the league's settings (type, QBs,
+  // TE premium) and your own rankings in dynasty and keeper leagues; redraft leagues use FantasyCalc's
+  // redraft values. Rest-of-season lineup change comes from the Season model when it's loaded.
+  const TC = { lg: store.get("ml.tclg"), a: null, b: null, give: new Set(), get: new Set(), res: null };
+  const tcBase = new Map();          // "leagueId|kind|qbs" -> Promise<consensus base>
+  function tradeBase(x) {
+    const key = `${x.lg.league_id}|${leagueKind(x)}|${qbsOf(x)}`;
+    if (!tcBase.has(key)) { tcBase.set(key, dynastyFor(x, true)); tcBase.get(key).catch(() => tcBase.delete(key)); }
+    return tcBase.get(key);
+  }
+  // A setting changed: TE premium only re-prices; type or QB format needs fresh values and a new Season run.
+  function leagueChanged(hard) {
+    if (hard) seasonCache = null;
+    rankVer++;
+    renderSeasonTabs();
+    renderTrade();
+  }
+
+  function kindPanel(x) {
+    const cfg = lgCfg(x), kind = leagueKind(x) || "redraft", sk = sleeperKind(x) || "redraft", tep = leagueTep(x);
+    const seg = (field, opts, cur) => `<div class="seg small" role="group" aria-label="${field}">${opts.map(([v, l]) => `<button type="button" data-lgset="${field}" data-v="${v}" aria-pressed="${v === cur}">${l}</button>`).join("")}</div>`;
+    const changed = cfg.kind || cfg.qbs || store.get("ml.tep." + x.lg.league_id);
+    return `<section class="card2" data-sec="League type"><h2>What kind of league is this?</h2>
+      <div class="kindrows">
+        <span class="ptiny">Type</span>${seg("kind", [["redraft", "Redraft"], ["keeper", "Keeper"], ["dynasty", "Dynasty"]], kind)}
+        <span class="ptiny">QBs</span>${seg("qbs", [[1, "1QB"], [2, "Superflex"]], qbsOf(x))}
+        <span class="ptiny">TEs</span>${seg("tep", TEP.map((t, i) => [i, t.label]), tep)}
+      </div>
+      <p class="ptiny">Sleeper says ${sk}, ${sleeperQbs(x) === 2 ? "superflex" : "1QB"}, ${TEP[tepAuto(x)].label.toLowerCase()}.${changed ? ` <button type="button" class="linkbtn" data-lgset="reset">Use Sleeper's settings</button>` : ""} This setting drives this league everywhere: Season, Adds &amp; trades, which of your rankings apply, and this calculator. Redraft uses FantasyCalc's redraft values; keeper and dynasty use dynasty values.</p>
+    </section>`;
+  }
+
+  async function renderTrade() {
+    if (tab !== "trade" || !last) return;
+    const body = $("tradeBody"), leagues = (last.data || []).filter(Boolean);
+    if (!leagues.length) { body.innerHTML = `<p class="loading">No leagues loaded.</p>`; return; }
+    const x = leagues.find(l => l.lg.league_id === TC.lg) || leagues.find(l => leagueKind(l)) || leagues[0];
+    if (TC.lg !== x.lg.league_id) { TC.lg = x.lg.league_id; TC.a = TC.b = null; TC.give.clear(); TC.get.clear(); }
+    if (!TC.a || !x.rosters.some(r => r.roster_id === TC.a)) TC.a = x.myRosterId;
+    if (!TC.b || TC.b === TC.a || !x.rosters.some(r => r.roster_id === TC.b)) TC.b = x.rosters.find(r => r.roster_id !== TC.a)?.roster_id;
+    if (!body.querySelector(".tcgrid")) body.innerHTML = `<p class="loading">Loading values…</p>`;
+    let base;
+    try { base = await tradeBase(x); }
+    catch { body.innerHTML = `<p class="loading">Couldn't reach FantasyCalc. Try again in a minute.</p>`; return; }
+    if (tab !== "trade" || TC.lg !== x.lg.league_id) return;
+    TC.x = x; TC.dyn = valueDyn(base, x);
+    paintTrade();
+    if (!TC.res && String(last.season) === String(state.league_season)) ensureSeason().then(r => { if (r && !r.unavailable) { TC.res = r; if (tab === "trade") paintTrade(); } }).catch(() => {});
+  }
+
+  function tcAssets(x, d, rid) {
+    const r = x.rosters.find(z => z.roster_id === rid), taxi = new Set(r.taxi || []), ir = new Set(r.reserve || []);
+    const players = (r.players || []).map(String).filter(p => d.vals.has(p)).map(p => {
+      const v = d.vals.get(p);
+      return { key: p, pid: p, name: v.name, sub: `${v.pos}${v.team ? " · " + v.team : ""}${taxi.has(p) ? " · taxi" : ir.has(p) ? " · IR" : ""}`, value: d.value(p), cons: d.cons(p) };
+    }).sort((a, b) => b.value - a.value);
+    const picks = (d.picks.get(rid) || []).map(k => ({ key: `pk:${k.season}-${k.round}-${k.from}`, pick: k, name: `${k.season} ${ord(k.round)}`, sub: k.from === rid ? "own pick" : `from ${x.nameOf(k.from)}`, value: d.value(k.id), cons: d.cons(k.id) }))
+      .sort((a, b) => a.pick.season - b.pick.season || a.pick.round - b.pick.round);
+    return { players, picks, unvalued: (r.players || []).length - players.length };
+  }
+
+  function paintTrade() {
+    const x = TC.x, d = TC.dyn, body = $("tradeBody");
+    if (!x || !d) return;
+    const leagues = (last.data || []).filter(Boolean);
+    const A = tcAssets(x, d, TC.a), B = tcAssets(x, d, TC.b);
+    const all = [...A.players, ...A.picks, ...B.players, ...B.picks];
+    const chosen = (side, set) => [...side.players, ...side.picks].filter(z => set.has(z.key));
+    const gA = chosen(A, TC.give), gB = chosen(B, TC.get);
+    const sum = (l, k) => l.reduce((t, z) => t + z[k], 0);
+    const va = sum(gA, "value"), vb = sum(gB, "value"), ca = sum(gA, "cons"), cb = sum(gB, "cons");
+    const nA = x.nameOf(TC.a), nB = x.nameOf(TC.b), mineA = TC.a === x.myRosterId;
+    const verdict = (a, b) => {
+      if (!a && !b) return "Pick players or picks on both sides.";
+      const hi = Math.max(a, b), gap = Math.abs(a - b), pct = hi ? gap / hi : 0;
+      if (pct < 0.05) return `Even: within ${Math.max(1, Math.round(pct * 100))}%.`;
+      return `<b>${esc(a > b ? nB : nA)}</b> wins by ${dv(gap)} (${Math.round(pct * 100)}%).`;
+    };
+    // Dynasty rank before and after, by total roster value (players + picks).
+    const totals = new Map([...d.teams].map(([rid, t]) => [rid, t.total]));
+    const after = new Map(totals); after.set(TC.a, totals.get(TC.a) - va + vb); after.set(TC.b, totals.get(TC.b) - vb + va);
+    const rankIn = (m, rid) => [...m.values()].filter(v => v > m.get(rid)).length + 1;
+    // Rest-of-season lineup change, when the Season model is loaded for this league.
+    const e = TC.res?.out.get(x.lg.league_id);
+    let ros = "";
+    if (e && (gA.length || gB.length)) {
+      const team = rid => e.model.teams.find(t => t.rid === rid);
+      const pidsA = gA.filter(z => z.pid).map(z => z.pid), pidsB = gB.filter(z => z.pid).map(z => z.pid);
+      const delta = (t, out, inn) => e.model.seasonPts(t.pool.filter(p => !out.includes(String(p))).concat(inn)) - t.total;
+      const tA = team(TC.a), tB = team(TC.b);
+      if (tA && tB) ros = `<div><span class="k">Lineup, rest of season</span><b class="num">${signed(delta(tA, pidsA, pidsB))}</b><span class="s">${esc(nA)}</span></div>
+        <div><span class="k">Lineup, rest of season</span><b class="num">${signed(delta(tB, pidsB, pidsA))}</b><span class="s">${esc(nB)}</span></div>`;
+    }
+    const label = d.custom ? "your values" : d.kind ? "dynasty value" : "redraft value";
+    const list = (side, set, which) => `${side.players.map(z => row(z, set, which)).join("")}${side.picks.length ? `<li class="sep">Picks</li>${side.picks.map(z => row(z, set, which)).join("")}` : ""}${side.unvalued ? `<li class="sep">${side.unvalued} more with no ${d.kind ? "dynasty" : "redraft"} value</li>` : ""}`;
+    const row = (z, set, which) => `<li><button type="button" data-tcpick="${which}" data-k="${esc(z.key)}" aria-pressed="${set.has(z.key)}"><span class="who"><b>${esc(z.name)}</b><span class="lbl">${esc(z.sub)}</span></span><span class="num">${dv(z.value)}</span></button></li>`;
+    const teamSel = (which, cur, other) => `<select data-tcteam="${which}" aria-label="Team">${x.rosters.filter(r => r.roster_id !== other).map(r => `<option value="${r.roster_id}" ${r.roster_id === cur ? "selected" : ""}>${esc(x.nameOf(r.roster_id))}${r.roster_id === x.myRosterId ? " (you)" : ""}</option>`).join("")}</select>`;
+    const chips = l => l.length ? l.map(z => `<span class="chip">${esc(z.name)} <span class="num">${dv(z.value)}</span></span>`).join("") : `<span class="ptiny">Nothing yet</span>`;
+    body.innerHTML = `<div class="lcol">
+      <div class="pvbar"><select data-tclg aria-label="League">${leagues.map(l => `<option value="${esc(l.lg.league_id)}" ${l === x ? "selected" : ""}>${esc(l.lg.name)}</option>`).join("")}</select>
+        <button type="button" class="ghost" data-tcclear ${gA.length || gB.length ? "" : "disabled"}>Clear trade</button></div>
+      ${kindPanel(x)}
+      <section class="card2" data-sec="Trade"><h2>Trade</h2>
+        <div class="tcsum">
+          <div><p class="eyebrow">${esc(nA)} gives</p><div class="chips">${chips(gA)}</div><p class="tot num">${dv(va)}</p></div>
+          <div><p class="eyebrow">${esc(nB)} gives</p><div class="chips">${chips(gB)}</div><p class="tot num">${dv(vb)}</p></div>
+        </div>
+        <p class="verdict">${verdict(va, vb)} <span class="ptiny">by ${label}${d.tep ? `, ${TEP[d.tep].label}` : ""}</span></p>
+        ${d.custom && (gA.length || gB.length) ? `<p class="ptiny">By consensus: ${dv(ca)} vs ${dv(cb)}. ${verdict(ca, cb).replace(/<[^>]+>/g, "")}</p>` : ""}
+        ${gA.length || gB.length ? `<div class="bigodds">
+          <div><span class="k">${d.kind ? "Dynasty" : "Value"} rank</span><b class="num">${ord(rankIn(totals, TC.a))} → ${ord(rankIn(after, TC.a))}</b><span class="s">${esc(nA)}</span></div>
+          <div><span class="k">${d.kind ? "Dynasty" : "Value"} rank</span><b class="num">${ord(rankIn(totals, TC.b))} → ${ord(rankIn(after, TC.b))}</b><span class="s">${esc(nB)}</span></div>
+          ${ros}</div>` : ""}
+        ${gA.length || gB.length ? (!e ? `<p class="ptiny">${TC.res === null && String(last.season) === String(state.league_season) ? "Rest-of-season lineup change appears once the season projections load." : ""}</p>` : "") : ""}
+        ${gA.length !== gB.length && gA.length && gB.length ? `<p class="ptiny">Uneven player counts: the side getting fewer, better players usually deserves a premium, since roster spots and starting slots are limited. These totals don't add one.</p>` : ""}
+      </section>
+      <div class="tcgrid">
+        <section class="card2"><div class="pvbar">${teamSel("a", TC.a, TC.b)}</div><ul class="tclist">${list(A, TC.give, "a")}</ul></section>
+        <section class="card2"><div class="pvbar">${teamSel("b", TC.b, TC.a)}</div><ul class="tclist">${list(B, TC.get, "b")}</ul></section>
+      </div>
+      <p class="note">Values: ${d.custom ? `your ${FMT_LABEL[d.numQbs]}${d.tep ? " " + TEP[d.tep].label : ""} rankings on FantasyCalc's curve` : `FantasyCalc ${d.kind ? "dynasty" : "redraft"} values (${d.numQbs === 2 ? "superflex" : "1QB"}, ${x.rosters.length} teams, ${d.ppr} PPR${d.tep ? `, TE values ×${TEP[d.tep].f.toFixed(2)} for ${TEP[d.tep].label}` : ""})`}.${d.kind === "dynasty" ? " Future picks are priced by round, not draft slot." : ""}${mineA ? "" : " You're looking at a trade between two other teams."}</p>
+    </div>`;
+    buildSubnav();
+  }
+
+  function wireTrade() {
+    const b = $("tradeBody");
+    b.addEventListener("change", e => {
+      if ("tclg" in e.target.dataset) { TC.lg = e.target.value; store.set("ml.tclg", TC.lg); TC.a = TC.b = null; TC.give.clear(); TC.get.clear(); renderTrade(); }
+      else if (e.target.dataset.tcteam) {
+        const v = +e.target.value;
+        if (e.target.dataset.tcteam === "a") { TC.a = v; TC.give.clear(); } else { TC.b = v; TC.get.clear(); }
+        paintTrade();
+      }
+    });
+    b.addEventListener("click", e => {
+      const t = e.target.closest("button");
+      if (!t || !TC.x) return;
+      if (t.dataset.tcpick) {
+        const set = t.dataset.tcpick === "a" ? TC.give : TC.get, k = t.dataset.k;
+        set.has(k) ? set.delete(k) : set.add(k);
+        paintTrade();
+      } else if ("tcclear" in t.dataset) { TC.give.clear(); TC.get.clear(); paintTrade(); }
+      else if (t.dataset.lgset) {
+        const x = TC.x, id = x.lg.league_id, f = t.dataset.lgset;
+        if (f === "reset") { store.set("ml.lg." + id, ""); store.set("ml.tep." + id, ""); leagueChanged(true); return; }
+        if (f === "tep") { store.set("ml.tep." + id, t.dataset.v); leagueChanged(false); return; }
+        const cfg = lgCfg(x);
+        cfg[f] = f === "qbs" ? +t.dataset.v : t.dataset.v;
+        if (f === "kind" && t.dataset.v === (sleeperKind(x) || "redraft")) delete cfg.kind;
+        if (f === "qbs" && cfg.qbs === sleeperQbs(x)) delete cfg.qbs;
+        store.set("ml.lg." + id, Object.keys(cfg).length ? JSON.stringify(cfg) : "");
+        TC.res = null;
+        leagueChanged(true);
+      }
+    });
   }
 
   function setStatus(msg, isErr) {
@@ -3002,6 +3185,7 @@ footer a { color: inherit; }
     wirePlayerTabs();
     wireIdp();
     wireRanks();
+    wireTrade();
     await readRankLink();
     showTab();
     $("pq").addEventListener("input", e => { pState.q = e.target.value; renderPlayers(); });
