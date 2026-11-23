@@ -2107,7 +2107,8 @@ footer a { color: inherit; }
       return st;
     }
     if (!w.reG) return st;
-    const hits = [...t.matchAll(w.reG)].map(x => x.index);
+    // where his name starts (the pattern also matches the character just before it)
+    const hits = [...t.matchAll(w.reG)].map(x => x.index + x[1].length);
     if (!hits.length) return st;
     const at = hits[0], two = /TWO-POINT CONVERSION/i.test(t), twoOk = two && /ATTEMPT SUCCEEDS/i.test(t);
     const passAt = t.search(/\bpass\b/i);
@@ -2143,7 +2144,7 @@ footer a { color: inherit; }
     }
     if (/\bsacked\b|\bkneels\b|\bspiked\b|\bpunts?\b|\bkicks\b/i.test(t)) return st;
     // he carried it: his name comes first, after any "(Shotgun)"-style formation tags
-    if (!t.slice(0, at + 1).replace(/^\s*(\([^)]*\)\s*)*/, "").replace(/[^A-Za-z]/g, "")) {
+    if (!t.slice(0, at).replace(/^\s*(\([^)]*\)\s*)*/, "").replace(/[^A-Za-z]/g, "")) {
       if (two) { if (twoOk) st.rush_2pt = 1; return st; }
       if (m || /for no gain/i.test(t)) { st.rush_att = 1; st.rush_yd = yds; if (td) st.rush_td = 1; }
     }
