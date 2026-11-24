@@ -237,6 +237,9 @@ table.roster tfoot td { font-weight: 600; }
 .rk .ctl button { min-width: 28px; padding: 5px 6px; font: 500 .78rem/1 var(--body); color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 5px; }
 .rk .none { color: var(--muted); font-size: .86rem; }
 .rklink { width: 100%; font-size: .78rem; }
+.ktcpaste { width: 100%; min-height: 5.5rem; padding: 8px 10px; font: .8rem/1.35 var(--body); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; resize: vertical; }
+.ktct td:nth-child(n+3), .ktct th:nth-child(n+3) { text-align: right; }
+.ktct .up { color: var(--good); } .ktct .down { color: var(--bad); }
 .rkbanner { border-color: var(--accent); }
 .rkask { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--bad); background: var(--bad-bg); border-radius: 8px; font-size: .88rem; }
 .rkask .btns { display: flex; gap: 8px; margin-left: auto; }
@@ -261,11 +264,11 @@ button.dangerbtn { background: var(--bad); border-color: var(--bad); color: #fff
 .tclist .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .tclist .who .lbl { display: block; color: var(--muted); font-size: .72rem; }
 .tepbar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
-.pkwrap summary { cursor: pointer; list-style: none; }
-.pkwrap summary::-webkit-details-marker { display: none; }
-.pkwrap summary h2 { display: inline; }
-.pkwrap summary h2::after { content: " \25BE"; color: var(--muted); font-size: .8em; }
-.pkwrap:not([open]) summary h2::after { content: " \25B8"; }
+.pkwrap summary, .ktcwrap summary { cursor: pointer; list-style: none; }
+.pkwrap summary::-webkit-details-marker, .ktcwrap summary::-webkit-details-marker { display: none; }
+.pkwrap summary h2, .ktcwrap summary h2 { display: inline; }
+.pkwrap summary h2::after, .ktcwrap summary h2::after { content: " \25BE"; color: var(--muted); font-size: .8em; }
+.pkwrap:not([open]) summary h2::after, .ktcwrap:not([open]) summary h2::after { content: " \25B8"; }
 .pkwrap > .pvbar { margin: 10px 0; }
 .pkgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 18px; }
 .pk { list-style: none; margin: 4px 0 0; padding: 0; }
@@ -2613,7 +2616,7 @@ footer a { color: inherit; }
   // one list for superflex and one for 1QB. "|" entries are tier breaks. Values follow the order:
   // your #10 gets consensus #10's value. Nobody else sees them unless you send your link.
   let rankVer = 0;                   // bumps on every edit so Season and Moves recompute
-  const RK = { copyTo: "", teams: null, fmt: null, tep: null, pos: "ALL", q: "", undo: [], pending: null, vals: null, drag: null, msg: "" };
+  const RK = { copyTo: "", teams: null, fmt: null, tep: null, pos: "ALL", q: "", undo: [], pending: null, vals: null, drag: null, msg: "", ktcDir: "all", ktcMsg: "" };
   const RK_FMT = { 2: "sf", 1: "1qb" }, FMT_LABEL = { 2: "superflex", 1: "1QB" };
   const rkKey = (uid, numQbs, tep = 0) => `ml.ranks.${uid}.${RK_FMT[numQbs]}${tep ? "." + TEP[tep].k : ""}`;
   const curKey = () => rkKey(last.user.user_id, RK.fmt, RK.tep);
@@ -2756,6 +2759,7 @@ footer a { color: inherit; }
         <input type="text" class="rklink" readonly hidden aria-label="Rankings link">
         <p class="ptiny">Saved in this browser only, for ${esc(last.user.display_name)}. Anyone who looks up your username on their own device sees plain consensus, not this. Copy link to move your rankings to another device or to share them on purpose. ${using.length ? `Used in ${esc(using.join(", "))}.` : `None of your dynasty or keeper leagues use ${fl} values.`}${RK.tep ? ` TE premium isn't priced by FantasyCalc, so its consensus here is FantasyCalc with TE values ×${TEP[RK.tep].f.toFixed(2)} (TE premium is +${TEP[RK.tep].per} per catch). Each TE setting keeps its own list.` : ""}</p>
       </section>
+      ${ktcSection()}
       <section class="card2" data-sec="Pick chart"><details class="pkwrap" ${store.get("ml.pkopen") === "0" ? "" : "open"}><summary><h2>Draft pick chart</h2></summary>
         <div class="pvbar"><span class="ptiny">Consensus value for every pick in the next rookie draft, with the player worth about the same. Teams:</span>
           <div class="seg small" role="group" aria-label="Teams in the draft">${[10, 12, 14].map(k => `<button type="button" data-rkteams="${k}" aria-pressed="${k === rkTeams()}">${k}</button>`).join("")}</div></div>
@@ -2835,6 +2839,98 @@ footer a { color: inherit; }
     }).join("") || `<li><span class="none">No players match.</span></li>`;
   }
 
+  // ===================== KTC compare =====================
+  // KeepTradeCut has no feed we can read, so its list comes in by hand: select the rankings on
+  // keeptradecut.com, copy, paste here. A copied row is rank (or "-" for a pick), name, position
+  // ("WR3" or "PICK"), then tier ("T4") on the dynasty page or draft year on the devy page, the
+  // 30-day trend, and the value last. Rookies carry an "R" stuck to their name ("Carnell TateR").
+  const KTC_POS = /^(QB|RB|WR|TE)\d+$|^PICK$/;
+  function parseKtc(text) {
+    const L = String(text || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const rows = [];
+    let devy = 0, prev = 0;
+    for (let i = 0; i + 2 < L.length; i++) {
+      if (!/^(\d+|-)$/.test(L[i]) || !KTC_POS.test(L[i + 2]) || /^(\d+|-)$/.test(L[i + 1])) continue;
+      const pick = L[i + 2] === "PICK";
+      let j = i + 3, value = null;
+      if (/^20\d\d$/.test(L[j] || "")) devy++;
+      for (; j < L.length; j++) {
+        if (/^(\d+|-)$/.test(L[j]) && KTC_POS.test(L[j + 2] || "") && !/^(\d+|-)$/.test(L[j + 1] || "")) break;
+        if (/^-?\d+$/.test(L[j])) value = +L[j];    // the last number in the row is the value
+      }
+      const rank = pick ? prev + 0.5 : +L[i];
+      if (!pick) prev = rank;
+      const name = pick ? L[i + 1] : L[i + 1].replace(/([a-z.')])R$/, "$1");
+      rows.push({ name, pos: pick ? "PICK" : L[i + 2].replace(/\d+$/, ""), rank, value });
+      i = j - 1;
+    }
+    return { rows, devy: devy > rows.length / 2 };
+  }
+  // Names match loosely: case, punctuation and Jr./III don't count. Picks match on year, tier and round.
+  function ktcKey(name, pos) {
+    const s = String(name).toLowerCase();
+    if (pos === "PICK") {
+      const y = /\b(20\d\d)\b/.exec(s)?.[1], r = /\b([1-4])(st|nd|rd|th)\b/.exec(s)?.[1], t = /\b(early|mid|late)\b/.exec(s)?.[1] || "";
+      return y && r ? `pick:${y}:${r}:${t}` : null;
+    }
+    return s.replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "").replace(/[^a-z]/g, "");
+  }
+
+  const ktcKeyFor = numQbs => `ml.ktc.${RK_FMT[numQbs]}`;
+  function loadKtc(numQbs) {
+    try { const r = JSON.parse(store.get(ktcKeyFor(numQbs)) || "null"); return r && Array.isArray(r.rows) && r.rows.length ? r : null; } catch { return null; }
+  }
+  // Replace the snapshot, or add to it: KTC shows its list a page at a time, so a full copy can take a few pastes.
+  function readKtcPaste(text, add) {
+    const { rows, devy } = parseKtc(text);
+    if (devy) return "That looks like KTC's devy list. Paste the dynasty rankings instead.";
+    if (!rows.length) return "Couldn't find any KTC rows in that. Copy from the first rank down to the last value and try again.";
+    const old = add ? loadKtc(RK.fmt) : null, byKey = new Map();
+    for (const r of [...(old?.rows || []), ...rows]) { const k = ktcKey(r.name, r.pos); if (k) byKey.set(k, r); }
+    const all = [...byKey.values()].sort((a, b) => a.rank - b.rank);
+    store.set(ktcKeyFor(RK.fmt), JSON.stringify({ rows: all, at: Date.now() }));
+    return `Read ${rows.length} rows.${old ? ` The snapshot now has ${all.length}.` : ""}`;
+  }
+  // Ranks are counted only among players and picks on both lists, so a name one side lacks doesn't shift the rest.
+  function ktcCompare(snap) {
+    const { order } = rkCurrent(), vals = RK.vals, fcBy = new Map(), ktcFor = new Map(), miss = [];
+    for (const [id, v] of vals) { const k = ktcKey(v.name, v.pos); if (k && !fcBy.has(k)) fcBy.set(k, id); }
+    for (const r of snap.rows) {
+      const k = ktcKey(r.name, r.pos);
+      // FantasyCalc prices later years' picks without early/mid/late; KTC's "Mid" pick stands in for those.
+      const id = fcBy.get(k) || (k && k.endsWith(":mid") ? fcBy.get(k.slice(0, -3)) : null);
+      if (id && !ktcFor.has(id)) ktcFor.set(id, r); else if (!id && r.pos !== "PICK") miss.push(r.name);
+    }
+    const kr = new Map([...ktcFor].sort((a, b) => a[1].rank - b[1].rank).map(([id], i) => [id, i + 1]));
+    const rows = order.filter(id => id !== "|" && kr.has(id)).map((id, i) => ({ id, you: i + 1, ktc: kr.get(id), v: vals.get(id) }));
+    rows.forEach(z => { z.gap = z.ktc - z.you; });
+    return { rows, miss };
+  }
+
+  function ktcSection() {
+    const snap = loadKtc(RK.fmt), mineSaved = !!rkCurrent().saved, fl = FMT_LABEL[RK.fmt];
+    let out = "";
+    if (snap) {
+      const { rows, miss } = ktcCompare(snap), dir = RK.ktcDir;
+      const list = rows.filter(z => dir === "up" ? z.gap > 0 : dir === "down" ? z.gap < 0 : z.gap)
+        .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap) || a.you - b.you).slice(0, 60);
+      const days = Math.floor((Date.now() - snap.at) / 864e5);
+      out = `<p class="ptiny">KTC ${fl} snapshot from ${new Date(snap.at).toLocaleDateString()}${days >= 14 ? ` (${days} days old, worth a fresh paste)` : ""}: ${snap.rows.length} rows, ${rows.length} matched to the board.${miss.length ? ` Not on FantasyCalc's board, so left out: ${esc(miss.slice(0, 8).join(", "))}${miss.length > 8 ? ` and ${miss.length - 8} more` : ""}.` : ""}</p>
+        <div class="pvbar"><div class="seg small" role="group" aria-label="Which gaps">${[["all", "Biggest gaps"], ["up", "You're higher"], ["down", "KTC is higher"]].map(([k, l]) => `<button type="button" data-ktcdir="${k}" aria-pressed="${k === dir}">${l}</button>`).join("")}</div></div>
+        <div class="tablewrap"><table class="tight ktct"><thead><tr><th>Player</th><th>Pos</th><th>${mineSaved ? "You" : "Consensus"}</th><th>KTC</th><th>Gap</th></tr></thead><tbody>
+        ${list.map(z => `<tr><td>${z.v.pos === "PICK" ? esc(z.v.name) : nm({ pid: z.id, name: z.v.name })}</td><td>${esc(z.v.pos)}</td><td class="num">${z.you}</td><td class="num">${z.ktc}</td><td class="num ${z.gap > 0 ? "up" : "down"}">${z.gap > 0 ? "&#9650;" : "&#9660;"}${Math.abs(z.gap)}</td></tr>`).join("") || `<tr><td colspan="5">No gaps here.</td></tr>`}
+        </tbody></table></div>
+        <p class="ptiny">Ranks count only players and picks on both lists. &#9650; means you rank him higher than KTC does; &#9660; means KTC is higher on him.${mineSaved ? "" : " You haven't changed your rankings yet, so this compares FantasyCalc's consensus with KTC."}</p>`;
+    }
+    return `<section class="card2" data-sec="KTC compare"><details class="ktcwrap" ${store.get("ml.ktcopen") === "0" ? "" : "open"}><summary><h2>Compare with KeepTradeCut</h2></summary>
+      <p class="lede">See where your ${fl} rankings and KTC's disagree. On keeptradecut.com, open Dynasty Rankings in ${fl}, select the list from the first rank down to the last value, copy, and paste it here. KTC shows the list a page at a time, so use Add for each further page.</p>
+      <textarea class="ktcpaste" aria-label="Paste KTC rankings" placeholder="Paste KTC's dynasty rankings here"></textarea>
+      <div class="pvbar"><button type="button" data-rk="ktcread">Replace snapshot</button><button type="button" class="ghost" data-rk="ktcadd" ${snap ? "" : "disabled"}>Add to snapshot</button><button type="button" class="ghost" data-rk="ktcclear" ${snap ? "" : "disabled"}>Clear</button>${RK.ktcMsg ? `<span class="ptiny">${esc(RK.ktcMsg)}</span>` : ""}</div>
+      ${out}
+      <p class="ptiny">The snapshot is saved in this browser only, one for superflex and one for 1QB. It doesn't update by itself: paste again whenever you want fresh numbers.</p>
+    </details></section>`;
+  }
+
   // Risky actions ask in a bar below the buttons, with "Yes" on the far side, so a double-click on the
   // button itself can't confirm. "Yes" also ignores taps for a moment after the bar opens.
   function askFirst(action, text, yes) {
@@ -2857,6 +2953,8 @@ footer a { color: inherit; }
       RK.undo.push({ key: curKey(), raw: store.get(curKey()) || "" });
       backup(curKey());
       saveRanks(uid, RK.fmt, null, RK.tep); RK.msg = "Back to consensus."; paintRanks();
+    } else if (action === "ktcclear") {
+      store.set(ktcKeyFor(RK.fmt), ""); RK.ktcMsg = "Snapshot cleared."; paintRanks();
     } else if (action === "copy" && RK.copyTo) {
       const [q, tp] = RK.copyTo.split(".").map(Number), from = listLabel(), order = rkCurrent().order, key = rkKey(uid, q, tp);
       RK.undo.push({ key, raw: store.get(key) || "" });
@@ -2884,6 +2982,7 @@ footer a { color: inherit; }
       if (t.dataset.rktep) { RK.tep = +t.dataset.rktep; store.set("ml.rktep", RK.tep); RK.msg = ""; renderRanks(); return; }
       if (t.dataset.rkfmt) { RK.fmt = +t.dataset.rkfmt; store.set("ml.rkfmt", RK.fmt); RK.msg = ""; renderRanks(); return; }
       if (t.dataset.rkteams) { RK.teams = +t.dataset.rkteams; paintRanks(); return; }
+      if (t.dataset.ktcdir) { RK.ktcDir = t.dataset.ktcdir; paintRanks(); return; }
       if (t.dataset.rkpos) { RK.pos = t.dataset.rkpos; t.parentElement.querySelectorAll("button").forEach(z => z.setAttribute("aria-pressed", z === t)); paintRankRows(); return; }
       if (t.dataset.mv) {
         const ix = +t.dataset.ix, vis = visible(), k = vis.indexOf(ix), dir = +t.dataset.mv, nb = vis[k + dir];
@@ -2940,6 +3039,16 @@ footer a { color: inherit; }
           break;
         }
         case "ignore": clearRankLink(); paintRanks(); break;
+        case "ktcread":
+        case "ktcadd": {
+          const text = b.querySelector(".ktcpaste")?.value || "";
+          RK.ktcMsg = text.trim() ? readKtcPaste(text, t.dataset.rk === "ktcadd") : "Paste KTC's list into the box first.";
+          paintRanks();
+          break;
+        }
+        case "ktcclear":
+          askFirst("ktcclear", `Clear the saved KTC ${FMT_LABEL[RK.fmt]} snapshot? You'd need to paste it again.`, "Yes, clear");
+          break;
       }
     });
     document.addEventListener("click", e => {
@@ -2948,7 +3057,10 @@ footer a { color: inherit; }
       store.set("ml.tep." + t.dataset.teplg, t.dataset.tep);
       leagueChanged(false);
     });
-    b.addEventListener("toggle", e => { if (e.target.classList?.contains("pkwrap")) store.set("ml.pkopen", e.target.open ? "1" : "0"); }, true);
+    b.addEventListener("toggle", e => {
+      if (e.target.classList?.contains("pkwrap")) store.set("ml.pkopen", e.target.open ? "1" : "0");
+      if (e.target.classList?.contains("ktcwrap")) store.set("ml.ktcopen", e.target.open ? "1" : "0");
+    }, true);
     b.addEventListener("change", e => {
       if (e.target.dataset.rk !== "copyto") return;
       RK.copyTo = e.target.value;
